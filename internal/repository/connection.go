@@ -32,7 +32,11 @@ func (cr *ConnectionRepo) IsOnline(ctx context.Context, userID int) (bool, error
 		return false, nil
 	}
 	return v, nil
+}
 
+func (cr *ConnectionRepo) Offline(ctx context.Context, userID int) error {
+	key := fmt.Sprintf("online:%d", userID)
+	return cr.redis.Del(ctx, key).Err()
 }
 
 func (cr *ConnectionRepo) Subscribe(ctx context.Context, userID int) *redis.PubSub {

@@ -54,8 +54,13 @@ func (mp *MessageRepo) UpdateMessageStatus(ctx context.Context, messageID int, s
 }
 
 // groups
-
 func (mp *MessageRepo) NewGroup(ctx context.Context, name string, authorID int) (int, error) {
+	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
 	query := `
 		INSERT INTO groups (name, author_id) 
 		VALUES ($1, $2)
@@ -63,7 +68,7 @@ func (mp *MessageRepo) NewGroup(ctx context.Context, name string, authorID int) 
 	`
 
 	var groupID int
-	err := mp.db.QueryRowContext(ctx, query, name, authorID).Scan(&groupID)
+	err = tx.QueryRowContext(ctx, query, name, authorID).Scan(&groupID)
 	if err != nil {
 		return 0, err
 	}
@@ -73,7 +78,14 @@ func (mp *MessageRepo) NewGroup(ctx context.Context, name string, authorID int) 
 		VALUES ($1, $2, 'ADMIN');
 	`
 
-	_, err = mp.db.ExecContext(ctx, query, groupID, authorID)
+	_, err = tx.ExecContext(ctx, query, groupID, authorID)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	return groupID, err
 }
 
@@ -98,35 +110,73 @@ func (mp *MessageRepo) DeleteGroup(ctx context.Context, userID, groupID int) err
 	return nil
 }
 
-func (mp *MessageRepo) NewGroupMember(ctx context.Context, groupID, userID int) error {
+func (mp *MessageRepo) NewGroupMember(ctx context.Context, groupID, userID int) (int, error) {
+	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
 	query := `
 		INSERT INTO group_members (group_id, user_id)
 		VALUES ($1, $2);
 	`
 
-	_, err := mp.db.ExecContext(ctx, query, groupID, userID)
-	return err
+	_, err = tx.ExecContext(ctx, query, groupID, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	query = `
+		INSERT INTO group_messages (group_id, from_user_id, message_type)
+		VALUES ($1, $2, 'NEW_MEMBER')
+		RETURNING id;
+	`
+
+	var messageID int
+	err = tx.QueryRowContext(ctx, query, groupID, userID).Scan(&messageID)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return messageID, nil
 }
 
-func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, groupID int, userID int) error {
+func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, groupID int, userID int) (int, error) {
+	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
 	query := `
 		DELETE FROM group_members WHERE group_id = $1 AND user_id = $2;
 	`
 
-	res, err := mp.db.ExecContext(ctx, query, groupID, userID)
+	_, err = tx.ExecContext(ctx, query, groupID, userID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	rowsAff, err := res.RowsAffected()
+	query = `
+		INSERT INTO group_messages (group_id, from_user_id, message_type)
+		VALUES($1, $2, 'EXIT_MEMBER')
+		RETURNING id;
+	`
+
+	var messageID int
+	err = tx.QueryRowContext(ctx, query, groupID, userID).Scan(&messageID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	if rowsAff == 0 {
-		return fmt.Errorf("group member %d not found", groupID)
+	if err := tx.Commit(); err != nil {
+		return 0, err
 	}
-	return nil
+	return messageID, nil
 }
 
 func (mp *MessageRepo) GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error) {
@@ -406,4 +456,27 @@ func (mp *MessageRepo) UpdateGroupMessageStatus(ctx context.Context, messageID, 
 		return fmt.Errorf("group or user not found")
 	}
 	return nil
+}
+
+func (mp *MessageRepo) GetUserContacts(ctx context.Context, userID int) ([]int, error) {
+	query := `
+		SELECT DISTINCT to_user_id AS contact_id
+		FROM messages
+		WHERE from_user_id = $1
+		
+		UNION
+		
+		SELECT DISTINCT from_user_id AS contact_id
+		FROM messages
+		WHERE to_user_id = $1
+		
+		ORDER BY contact_id;
+	`
+
+	var contacts []int
+	err := mp.db.SelectContext(ctx, &contacts, query, userID)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	return contacts, nil
 }

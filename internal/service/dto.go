@@ -12,6 +12,12 @@ type MessageType string
 const (
 	PrivateMessageType MessageType = "PRIVATE_MESSAGE"
 	GroupMessageType   MessageType = "GROUP_MESSAGE"
+
+	NewGroupMember  MessageType = "NEW_MEMBER"
+	ExitGroupMember MessageType = "EXIT_MEMBER"
+
+	UserOnlineStatus  MessageType = "USER_ONLINE"
+	UserOfflineStatus MessageType = "USER_OFFLINE"
 )
 
 type NewMessageRaw struct {
@@ -29,7 +35,6 @@ type GroupMessage struct {
 	Content string `json:"content"`
 }
 
-// ToUserID - айди получателя, как личного чата, так и пользователя их группы
 type ProduceMessage struct {
 	MessageID   int         `json:"message_id"`
 	TypeMessage MessageType `json:"message_type"`

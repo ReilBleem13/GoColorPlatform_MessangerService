@@ -13,8 +13,8 @@ type MessageRepoIn interface {
 
 	NewGroup(ctx context.Context, name string, authorID int) (int, error)
 	DeleteGroup(ctx context.Context, userID, groupID int) error
-	NewGroupMember(ctx context.Context, groupID, userID int) error
-	DeleteGroupMember(ctx context.Context, groupID int, userID int) error
+	NewGroupMember(ctx context.Context, groupID, userID int) (int, error)
+	DeleteGroupMember(ctx context.Context, groupID int, userID int) (int, error)
 	GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error)
 	GetUserGroups(ctx context.Context, userID int) ([]UserGroup, error)
 	ChangeGroupMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
@@ -23,10 +23,12 @@ type MessageRepoIn interface {
 	PaginatePrivateMessages(ctx context.Context, userID1, userID2 int, cursor *int) ([]ProduceMessage, *int, bool, error)
 
 	UpdateGroupMessageStatus(ctx context.Context, messageID, userID int, status domain.MessageStatus) error
+	GetUserContacts(ctx context.Context, userID int) ([]int, error)
 }
 
 type ConnectionRepoIn interface {
 	Online(ctx context.Context, userID int) error
+	Offline(ctx context.Context, userID int) error
 	IsOnline(ctx context.Context, userID int) (bool, error)
 	Subscribe(ctx context.Context, userID int) *redis.PubSub
 	Produce(ctx context.Context, channel string, msg *ProduceMessage) error

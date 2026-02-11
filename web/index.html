@@ -233,13 +233,6 @@
             overflow: hidden;
         }
 
-        .chat-header {
-            padding: 15px 20px;
-            background: white;
-            border-bottom: 1px solid #e9ecef;
-            font-weight: 600;
-            color: #333;
-        }
 
         .messages {
             flex: 1;
@@ -285,6 +278,57 @@
             font-size: 11px;
             opacity: 0.8;
             margin-top: 4px;
+        }
+
+        .message.system {
+            background: #e9ecef;
+            color: #6c757d;
+            border: none;
+            max-width: 100%;
+            margin: 10px auto;
+            text-align: center;
+            font-size: 13px;
+            font-style: italic;
+            padding: 8px 16px;
+        }
+
+        .chat-header {
+            padding: 15px 20px;
+            background: white;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .online-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #28a745;
+            display: inline-block;
+            margin-left: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        .offline-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #6c757d;
+            display: inline-block;
+            margin-left: 8px;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
         }
 
         .message-input-area {
@@ -449,6 +493,7 @@
         let currentGroupId = null;
         let currentChatType = 'private'; // 'private' or 'group'
         let groups = [];
+        let onlineUsers = new Set(); // Хранит ID пользователей, которые онлайн
 
         const userIdInput = document.getElementById('userIdInput');
         const targetUserIdInput = document.getElementById('targetUserIdInput');
@@ -502,6 +547,47 @@
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
 
+        function addSystemMessage(content) {
+            const emptyState = messagesDiv.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message system';
+            messageDiv.textContent = content;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function updateOnlineStatus(userId, isOnline) {
+            if (isOnline) {
+                onlineUsers.add(userId);
+            } else {
+                onlineUsers.delete(userId);
+            }
+            updateChatHeader();
+        }
+
+        function updateChatHeader() {
+            if (currentChatType === 'private' && targetUserId) {
+                const isOnline = onlineUsers.has(targetUserId);
+                const indicator = isOnline 
+                    ? '<span class="online-indicator" title="Онлайн"></span>' 
+                    : '<span class="offline-indicator" title="Офлайн"></span>';
+                chatHeader.innerHTML = `Личный чат с пользователем ${targetUserId}${indicator}`;
+            } else if (currentChatType === 'group' && currentGroupId) {
+                const group = groups.find(g => g.id === currentGroupId);
+                if (group) {
+                    chatHeader.textContent = `Группа: ${group.name} (ID: ${currentGroupId})`;
+                }
+            } else {
+                chatHeader.innerHTML = currentChatType === 'private' 
+                    ? 'Выберите получателя' 
+                    : 'Выберите группу';
+            }
+        }
+
         function connect() {
             const userId = parseInt(userIdInput.value);
 
@@ -533,13 +619,48 @@
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    // Сообщения, приходящие через WebSocket, всегда отображаются как полученные
-                    // потому что они приходят от сервера (от другого пользователя или из группы)
+                    const messageType = data.message_type;
+                    const fromUserId = data.from_user_id;
+                    const groupId = data.group_id || null;
+
+                    // Обработка системных сообщений о входе/выходе из группы
+                    if (messageType === 'NEW_MEMBER') {
+                        if (groupId === currentGroupId) {
+                            addSystemMessage(`Пользователь ${fromUserId} присоединился к группе`);
+                        }
+                        return;
+                    }
+
+                    if (messageType === 'EXIT_MEMBER') {
+                        if (groupId === currentGroupId) {
+                            addSystemMessage(`Пользователь ${fromUserId} покинул группу`);
+                        }
+                        return;
+                    }
+
+                    // Обработка статусов онлайн/офлайн (только для личных чатов)
+                    if (messageType === 'USER_ONLINE') {
+                        updateOnlineStatus(fromUserId, true);
+                        // Показываем уведомление только если это текущий собеседник
+                        if (currentChatType === 'private' && fromUserId === targetUserId) {
+                            addSystemMessage(`Пользователь ${fromUserId} теперь онлайн`);
+                        }
+                        return;
+                    }
+
+                    if (messageType === 'USER_OFFLINE') {
+                        updateOnlineStatus(fromUserId, false);
+                        // Показываем уведомление только если это текущий собеседник
+                        if (currentChatType === 'private' && fromUserId === targetUserId) {
+                            addSystemMessage(`Пользователь ${fromUserId} теперь офлайн`);
+                        }
+                        return;
+                    }
+
+                    // Обработка обычных сообщений
                     const isSent = false;
                     const content = data.content || '';
                     const messageId = data.message_id;
-                    const fromUserId = data.from_user_id;
-                    const groupId = data.group_id || null;
                     
                     addMessage(content, isSent, messageId, fromUserId, groupId);
                 } catch (e) {
@@ -585,6 +706,8 @@
                     alert('Пожалуйста, введите корректный ID получателя');
                     return;
                 }
+                targetUserId = targetId;
+                updateChatHeader();
 
                 message = {
                     type: 'PRIVATE_MESSAGE',
@@ -860,17 +983,17 @@
 
             if (tabType === 'private') {
                 privateChatControls.style.display = 'block';
-                chatHeader.textContent = 'Личные сообщения';
                 currentGroupId = null;
                 messagesDiv.innerHTML = '<div class="empty-state">Введите ID получателя и начните общение</div>';
+                updateChatHeader();
             } else {
                 privateChatControls.style.display = 'none';
-                chatHeader.textContent = 'Групповые сообщения';
                 targetUserId = null;
                 if (currentGroupId) {
                     const group = groups.find(g => g.id === currentGroupId);
                     chatHeader.textContent = `Группа: ${group.name} (ID: ${currentGroupId})`;
                 } else {
+                    chatHeader.textContent = 'Выберите группу';
                     messagesDiv.innerHTML = '<div class="empty-state">Выберите группу для общения</div>';
                 }
             }
@@ -894,6 +1017,18 @@
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 sendMessage();
+            }
+        });
+
+        // Обновление заголовка при изменении ID получателя
+        targetUserIdInput.addEventListener('input', (e) => {
+            const newTargetId = parseInt(e.target.value);
+            if (newTargetId && newTargetId > 0) {
+                targetUserId = newTargetId;
+                updateChatHeader();
+            } else {
+                targetUserId = null;
+                chatHeader.innerHTML = 'Выберите получателя';
             }
         });
 

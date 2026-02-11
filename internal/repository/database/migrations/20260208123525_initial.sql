@@ -32,8 +32,9 @@ CREATE TABLE groups (
 CREATE TABLE group_messages (
     id SERIAL PRIMARY KEY,
     group_id INT REFERENCES groups(id) ON DELETE CASCADE NOT NULL,
+    message_type TEXT DEFAULT 'GROUP_MESSAGE',
     from_user_id INT REFERENCES users(id) NOT NULL,
-    content TEXT NOT NULL,
+    content TEXT,
     created_at TIMESTAMP DEFAULT NOW()
 );
 

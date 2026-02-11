@@ -45,10 +45,17 @@ func (ms *MessageService) HandleConn(ctx context.Context, client *Client) {
 		log.Printf("Failed to set user %d online: %v", client.id, err)
 	}
 
+	ms.notifyStatusChange(ctx, client.id, UserOnlineStatus)
+
 	pubSub := ms.connRepo.Subscribe(ctx, client.id)
 	client.outboard = pubSub.Channel()
 
 	defer func() {
+		if err := ms.connRepo.Offline(ctx, client.id); err != nil {
+			log.Printf("Failed to set user %d offline: %v", client.id, err)
+		}
+		ms.notifyStatusChange(context.Background(), client.id, UserOfflineStatus)
+
 		client.hub.unregister <- client
 		client.conn.Close()
 		pubSub.Close()
@@ -151,16 +158,16 @@ func (ms *MessageService) handleGroupMessage(ctx context.Context, client *Client
 		return
 	}
 
-	for _, memberID := range groupMembersIDs {
-		produceMsg := &ProduceMessage{
-			MessageID:   messageID,
-			TypeMessage: GroupMessageType,
-			FromUserID:  client.id,
-			CreatedAt:   time.Now(),
-			Content:     msg.Content,
-			GroupID:     &msg.GroupID,
-		}
+	produceMsg := &ProduceMessage{
+		MessageID:   messageID,
+		TypeMessage: GroupMessageType,
+		FromUserID:  client.id,
+		CreatedAt:   time.Now(),
+		Content:     msg.Content,
+		GroupID:     &msg.GroupID,
+	}
 
+	for _, memberID := range groupMembersIDs {
 		if memberID != client.id {
 			ms.handleProduce(ctx, memberID, produceMsg)
 		}
@@ -186,6 +193,27 @@ func (ms *MessageService) handleProduce(ctx context.Context, toUserID int, msg *
 		log.Printf("Failed to produce message %d: %v", msg.MessageID, err)
 	} else {
 		log.Printf("Message %d successfully produced", msg.MessageID)
+	}
+}
+
+func (ms *MessageService) notifyStatusChange(ctx context.Context, userID int, status MessageType) {
+	contacts, err := ms.msgRepo.GetUserContacts(ctx, userID)
+	if err != nil {
+		log.Printf("Failed to get contacts for user %d: %v", userID, err)
+		return
+	}
+
+	produceMsg := &ProduceMessage{
+		MessageID:   0,
+		TypeMessage: status,
+		FromUserID:  userID,
+		CreatedAt:   time.Now(),
+	}
+
+	for _, contact := range contacts {
+		if contact != userID {
+			ms.handleProduce(ctx, contact, produceMsg)
+		}
 	}
 }
 
@@ -257,18 +285,55 @@ func (ms *MessageService) DeleteGroup(ctx context.Context, groupID, userID int) 
 }
 
 func (ms *MessageService) NewGroupMember(ctx context.Context, groupID, userID int) error {
-	err := ms.msgRepo.NewGroupMember(ctx, groupID, userID)
+	messageID, err := ms.msgRepo.NewGroupMember(ctx, groupID, userID)
 	if err != nil {
 		slog.Error("Failed to create new group member", "error", err)
 		return err
+	}
+
+	memberIDs, err := ms.msgRepo.GetAllGroupMembers(ctx, groupID)
+	if err != nil {
+		slog.Error("Failed to get all group members", "error", err)
+		return err
+	}
+
+	for _, id := range memberIDs {
+		if id != userID {
+			ms.handleProduce(ctx, id, &ProduceMessage{
+				MessageID:   messageID,
+				TypeMessage: NewGroupMember,
+				FromUserID:  userID,
+				CreatedAt:   time.Now(),
+				GroupID:     &groupID,
+			})
+		}
 	}
 	return nil
 }
 
 func (ms *MessageService) DeleteGroupMember(ctx context.Context, groupID, userID int) error {
-	if err := ms.msgRepo.DeleteGroupMember(ctx, groupID, userID); err != nil {
+	messageID, err := ms.msgRepo.DeleteGroupMember(ctx, groupID, userID)
+	if err != nil {
 		slog.Error("Failed to delete group member", "error", err)
 		return err
+	}
+
+	memberIDs, err := ms.msgRepo.GetAllGroupMembers(ctx, groupID)
+	if err != nil {
+		slog.Error("Failed to get all group members", "error", err)
+		return err
+	}
+
+	for _, id := range memberIDs {
+		if id != userID {
+			ms.handleProduce(ctx, id, &ProduceMessage{
+				MessageID:   messageID,
+				TypeMessage: ExitGroupMember,
+				FromUserID:  userID,
+				CreatedAt:   time.Now(),
+				GroupID:     &groupID,
+			})
+		}
 	}
 	return nil
 }
