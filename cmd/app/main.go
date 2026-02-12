@@ -6,19 +6,31 @@ import (
 	"log/slog"
 	"path/filepath"
 
+	"github.com/ReilBleem13/MessangerV2/internal/config"
 	"github.com/ReilBleem13/MessangerV2/internal/repository/cache"
 	"github.com/ReilBleem13/MessangerV2/internal/repository/database"
 	"github.com/ReilBleem13/MessangerV2/internal/server"
 	"github.com/ReilBleem13/MessangerV2/internal/service"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/pressly/goose/v3"
 )
 
 func main() {
-	cache.NewRedisClient()
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("no .env file: ", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("Failed to load config", "error", err)
+		return
+	}
+
+	cache.NewRedisClient(cfg.Redis.Port)
 	slog.Info("Redis inited")
 
-	dsn := "host=localhost port=5432 user=test password=test dbname=test sslmode=disable"
+	dsn := cfg.Database.DSN()
 	if err := database.NewPostgresClient(dsn); err != nil {
 		log.Fatal(err)
 	}

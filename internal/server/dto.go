@@ -9,12 +9,13 @@ type NewGroupJSON struct {
 	Name string `json:"name"`
 }
 
-type NewGroupMember struct {
+type NewGroupMemberJSON struct {
 	UserID int `json:"user_id"`
 }
 
-type DeleteGroupMember struct {
-	UserID int `json:"user_id"`
+// KICKED_MEMBER или LEFT_MEMBER
+type DeleteGroupMemberJSON struct {
+	Type service.EventType `json:"type"`
 }
 
 type UpdateGroupMemberRoleJSON struct {

@@ -14,11 +14,14 @@ type MessageRepoIn interface {
 
 	NewGroup(ctx context.Context, name string, authorID int) (int, error)
 	DeleteGroup(ctx context.Context, userID, groupID int) error
+
 	NewGroupMember(ctx context.Context, groupID, userID int) (int, error)
-	DeleteGroupMember(ctx context.Context, groupID int, userID int) (int, error)
+	DeleteGroupMember(ctx context.Context, groupID int, userID int, typeMsg EventType) (int, error)
 	GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error)
+
 	GetUserGroups(ctx context.Context, userID int) ([]UserGroup, error)
 	ChangeGroupMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
+
 	NewGroupMessage(ctx context.Context, groupID int, fromUserID int, content string) (int, error)
 	PaginateGroupMessages(ctx context.Context, groupID int, messageID *int) ([]ProduceMessage, *int, bool, error)
 	PaginatePrivateMessages(ctx context.Context, userID1, userID2 int, cursor *int) ([]ProduceMessage, *int, bool, error)
@@ -43,9 +46,11 @@ type MessageServiceIn interface {
 
 	NewGroup(ctx context.Context, name string, authorID int) (int, error)
 	DeleteGroup(ctx context.Context, groupID, userID int) error
-	NewGroupMember(ctx context.Context, groupID, invitedByID, invitedID int) error
-	DeleteGroupMember(ctx context.Context, groupID, userID int) error
+
+	NewGroupMember(ctx context.Context, in *GroupMemberDTO) error
+	DeleteGroupMember(ctx context.Context, in *GroupMemberDTO) error
 	GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error)
+
 	GetUserGroups(ctx context.Context, userID int) ([]UserGroup, error)
 	ChangeGroupMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
 

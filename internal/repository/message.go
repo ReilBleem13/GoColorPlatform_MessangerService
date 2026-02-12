@@ -145,7 +145,7 @@ func (mp *MessageRepo) NewGroupMember(ctx context.Context, groupID, userID int) 
 	return messageID, nil
 }
 
-func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, groupID int, userID int) (int, error) {
+func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, groupID int, userID int, typeMsg service.EventType) (int, error) {
 	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
@@ -163,12 +163,12 @@ func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, groupID int, userI
 
 	query = `
 		INSERT INTO group_messages (group_id, from_user_id, message_type)
-		VALUES($1, $2, 'EXIT_MEMBER')
+		VALUES($1, $2, $3)
 		RETURNING id;
 	`
 
 	var messageID int
-	err = tx.QueryRowContext(ctx, query, groupID, userID).Scan(&messageID)
+	err = tx.QueryRowContext(ctx, query, groupID, userID, string(typeMsg)).Scan(&messageID)
 	if err != nil {
 		return 0, err
 	}

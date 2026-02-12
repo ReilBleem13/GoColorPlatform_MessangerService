@@ -31,7 +31,7 @@ func writeError(w http.ResponseWriter, err *domain.AppError) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func hadleError(w http.ResponseWriter, err error) {
+func handleError(w http.ResponseWriter, err error) {
 	var appErr *domain.AppError
 
 	if errors.As(err, &appErr) {

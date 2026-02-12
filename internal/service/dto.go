@@ -13,10 +13,15 @@ const (
 	PrivateMessageType EventType = "PRIVATE_MESSAGE"
 	GroupMessageType   EventType = "GROUP_MESSAGE"
 
-	NewGroupMemberType  EventType = "NEW_MEMBER"
-	MemberLeftGroupType EventType = "MEMBER_LEFT"
+	NewMemberType    EventType = "NEW_MEMBER"
+	LeftMemberType   EventType = "LEFT_MEMBER"
+	KickedMemberType EventType = "KICKED_MEMBER"
 
-	InvitedToGroup EventType = "INVITED_TO_GROUP"
+	// Ивенты для отправки конкретному пользователю
+	// тому кого добавили, или тому кого кикнули
+	InvitedToGroup   EventType = "INVITED_TO_GROUP"
+	DeletedFromGroup EventType = "DELETED_FROM_GROUP"
+
 	PresenceChange EventType = "PRESENCE_CHANGE"
 )
 
@@ -73,12 +78,17 @@ type GroupChangeMemberStatusEvent struct {
 	UserID    int `json:"user_id"`
 }
 
-type InvitedToGroupEvent struct {
-	GroupID     int `json:"group_id"`
-	InvitedByID int `json:"invited_by_id"`
+type ChangeListOfGroupsEvent struct {
+	GroupID int `json:"group_id"`
 }
 
 // DTOs
+type GroupMemberDTO struct {
+	GroupID   int
+	SubjectID int
+	ObjectID  int
+	Type      *EventType
+}
 
 type UpdateGroupMemberRoleDTO struct {
 	Role    domain.GroupMemberRole
@@ -93,6 +103,7 @@ type PaginatePrivateMessagesDTO struct {
 }
 
 type PaginateGroupMessagesDTO struct {
+	UserID  int
 	GroupID int
 	Cursor  *int
 }

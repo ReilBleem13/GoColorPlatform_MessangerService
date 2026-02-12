@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ReilBleem13/MessangerV2/internal/config"
 	"github.com/ReilBleem13/MessangerV2/internal/repository"
 	"github.com/ReilBleem13/MessangerV2/internal/repository/cache"
 	"github.com/ReilBleem13/MessangerV2/internal/repository/database"
@@ -27,6 +28,7 @@ func WithMigrateDown(m func() error) Option {
 type Server struct {
 	ctx         context.Context
 	router      *http.ServeMux
+	cfg         *config.Config
 	migrateDown func() error
 }
 
@@ -54,15 +56,18 @@ func NewServer(ctx context.Context, opts ...Option) *Server {
 func (s *Server) setupRoutes(h *Handler) {
 	s.router.HandleFunc("/ws", h.handleWS)
 
-	s.router.HandleFunc("POST /group", h.handleNewGroup)
-	s.router.HandleFunc("DELETE /group/{group_id}", h.handleDeleteGroup)
-	s.router.HandleFunc("POST /group/{group_id}/members", h.handleNewGroupMember)
-	s.router.HandleFunc("DELETE /group/{group_id}/members", h.handleDeleteGroupMember)
-	s.router.HandleFunc("GET /group/{group_id}/members", h.handleGetGroupMembers)
-	s.router.HandleFunc("GET /user/{user_id}/groups", h.handleGetUserGroups)
-	s.router.HandleFunc("PATCH /users/groups/{group_id}", h.handleUpdateGroupMemberRole)
-	s.router.HandleFunc("GET /paginate/private", h.handlePaginatePrivateMessages)
-	s.router.HandleFunc("GET /paginate/groups/{group_id}", h.handlePaginateGroupMessages)
+	authMiddleware := AuthMiddleware(s.cfg.JWT.Secret)
+
+	s.router.Handle("POST /groups", authMiddleware(http.HandlerFunc(h.handleNewGroup)))
+	s.router.Handle("DELETE /groups/{group_id}", authMiddleware(http.HandlerFunc(h.handleDeleteGroup)))
+	s.router.Handle("POST /groups/{group_id}/members", authMiddleware(http.HandlerFunc(h.handleNewGroupMember)))
+	s.router.Handle("DELETE /groups/{group_id}/members/{user_id}", authMiddleware(http.HandlerFunc(h.handleDeleteGroupMember)))
+	s.router.Handle("PATCH /groups/{group_id}/members/{user_id}", authMiddleware(http.HandlerFunc(h.handleUpdateGroupMemberRole)))
+	s.router.Handle("GET /groups/{group_id}/members", authMiddleware(http.HandlerFunc(h.handleGetGroupMembers)))
+	s.router.Handle("GET /groups/{group_id}/chat", authMiddleware(http.HandlerFunc(h.handlePaginateGroupMessages)))
+
+	s.router.Handle("GET /users/groups", authMiddleware(http.HandlerFunc(h.handleGetUserGroups)))
+	s.router.Handle("GET /users/chat/{chat_id}", authMiddleware(http.HandlerFunc(h.handlePaginatePrivateMessages)))
 
 	fileServer := http.FileServer(http.Dir("./web"))
 	s.router.Handle("/", http.StripPrefix("/", fileServer))

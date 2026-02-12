@@ -37,10 +37,26 @@ var (
 		Status:  404,
 	}
 
-	///
 	ErrAlreadyExists = &AppError{
 		Code:    "ALREADY_EXISTS",
 		Message: "Already exists",
 		Status:  409,
+	}
+
+	ErrInvalidToken = &AppError{
+		Code:    "TOKEN_INVALID",
+		Message: "Token is invalid",
+		Status:  401,
+	}
+
+	ErrExpiredToken = &AppError{
+		Code:    "TOKEN_EXPIRED",
+		Message: "Token is expired",
+		Status:  401,
+	}
+
+	ErrUnauthorizedError = &AppError{
+		Code:   "Unauthorized",
+		Status: 401,
 	}
 )
