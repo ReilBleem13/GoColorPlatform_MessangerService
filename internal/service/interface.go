@@ -9,7 +9,7 @@ import (
 )
 
 type MessageRepoIn interface {
-	NewMessage(ctx context.Context, fromUserID int, in *PrivateMessage) (int, error)
+	NewMessage(ctx context.Context, fromUserID int, in *NewMessage) (int, error)
 	UpdateMessageStatus(ctx context.Context, messageID int, status domain.MessageStatus) error
 
 	NewGroup(ctx context.Context, name string, authorID int) (int, error)
@@ -34,8 +34,8 @@ type ConnectionRepoIn interface {
 	UpdateOnlineStatus(ctx context.Context, in *Presence) error
 	GetOnlineStatus(ctx context.Context, userID int) (time.Time, error)
 
-	GetAllOnlineUsers(ctx context.Context) ([]int, error)
-	DeleteOnlineStatus(ctx context.Context, userID int)
+	GetAllOnlineUsers(ctx context.Context) ([]OnlineUsersWithLastTimestamp, error)
+	DeleteOnlineStatus(ctx context.Context, userID int) error
 }
 
 type MessageServiceIn interface {
@@ -43,7 +43,7 @@ type MessageServiceIn interface {
 
 	NewGroup(ctx context.Context, name string, authorID int) (int, error)
 	DeleteGroup(ctx context.Context, groupID, userID int) error
-	NewGroupMember(ctx context.Context, groupID, userID int) error
+	NewGroupMember(ctx context.Context, groupID, invitedByID, invitedID int) error
 	DeleteGroupMember(ctx context.Context, groupID, userID int) error
 	GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error)
 	GetUserGroups(ctx context.Context, userID int) ([]UserGroup, error)

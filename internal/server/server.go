@@ -25,11 +25,12 @@ func WithMigrateDown(m func() error) Option {
 }
 
 type Server struct {
+	ctx         context.Context
 	router      *http.ServeMux
 	migrateDown func() error
 }
 
-func NewServer(opts ...Option) *Server {
+func NewServer(ctx context.Context, opts ...Option) *Server {
 	s := &Server{
 		router: http.NewServeMux(),
 	}
@@ -40,7 +41,9 @@ func NewServer(opts ...Option) *Server {
 
 	msgRepository := repository.NewMessageRepo(database.Client(), cache.Client())
 	connRepository := repository.NewConnectionRepo(cache.Client())
-	msgService := service.NewMessageService(msgRepository, connRepository)
+
+	heartbeatService := service.NewHeartbeatService(ctx, connRepository)
+	msgService := service.NewMessageService(heartbeatService, msgRepository, connRepository)
 
 	h := NewHandler(msgService)
 	s.setupRoutes(h)
@@ -84,7 +87,7 @@ func (s *Server) Run(addr string) error {
 
 	<-quit
 
-	ctx, shutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, shutdown := context.WithTimeout(s.ctx, 10*time.Second)
 	defer shutdown()
 
 	if s.migrateDown != nil {

@@ -35,7 +35,6 @@ func (cr *ConnectionRepo) Produce(ctx context.Context, channel string, msg *serv
 	return cr.redis.Publish(ctx, channel, data).Err()
 }
 
-// Online V2
 func (cr *ConnectionRepo) UpdateOnlineStatus(ctx context.Context, in *service.Presence) error {
 	key := fmt.Sprintf("user:online:%d", in.UserID)
 	return cr.redis.Set(ctx, key, in.Timestamp, 3*24*time.Hour).Err()
@@ -46,23 +45,38 @@ func (cr *ConnectionRepo) GetOnlineStatus(ctx context.Context, userID int) (time
 	return cr.redis.Get(ctx, key).Time()
 }
 
-func (cr *ConnectionRepo) GetAllOnlineUsers(ctx context.Context) ([]int, error) {
-	keys, err := cr.redis.Keys(ctx, "user:online:*").Result()
-	if err != nil {
-		return nil, err
-	}
+func (cr *ConnectionRepo) GetAllOnlineUsers(ctx context.Context) ([]service.OnlineUsersWithLastTimestamp, error) {
+	result := []service.OnlineUsersWithLastTimestamp{}
+	var cursor uint64
 
-	userIDs := make([]int, 0, len(keys))
-	for _, key := range keys {
-		userIDStr := strings.TrimPrefix(key, "user:online:")
-		userID, err := strconv.Atoi(userIDStr)
+	for {
+		keys, nextCursor, err := cr.redis.Scan(ctx, cursor, "user:online:*", 1000).Result()
 		if err != nil {
-			continue
+			return nil, err
 		}
-		userIDs = append(userIDs, userID)
-	}
 
-	return userIDs, nil
+		for _, key := range keys {
+			userIDStr := strings.TrimPrefix(key, "user:online:")
+			userID, err := strconv.Atoi(userIDStr)
+			if err != nil {
+				continue
+			}
+
+			timestamp, err := cr.redis.Get(ctx, key).Time()
+			if err == nil {
+				result = append(result, service.OnlineUsersWithLastTimestamp{
+					UserID:     userID,
+					Timestampt: timestamp,
+				})
+			}
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return result, nil
 }
 
 func (cr *ConnectionRepo) DeleteOnlineStatus(ctx context.Context, userID int) error {

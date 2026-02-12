@@ -7,44 +7,78 @@ import (
 	"github.com/ReilBleem13/MessangerV2/internal/domain"
 )
 
-type MessageType string
+type EventType string
 
 const (
-	PrivateMessageType MessageType = "PRIVATE_MESSAGE"
-	GroupMessageType   MessageType = "GROUP_MESSAGE"
+	PrivateMessageType EventType = "PRIVATE_MESSAGE"
+	GroupMessageType   EventType = "GROUP_MESSAGE"
 
-	NewGroupMember  MessageType = "NEW_MEMBER"
-	ExitGroupMember MessageType = "EXIT_MEMBER"
+	NewGroupMemberType  EventType = "NEW_MEMBER"
+	MemberLeftGroupType EventType = "MEMBER_LEFT"
 
-	PresenceChange MessageType = "PRESENCE_CHANGE"
+	InvitedToGroup EventType = "INVITED_TO_GROUP"
+	PresenceChange EventType = "PRESENCE_CHANGE"
 )
 
-type NewMessageRaw struct {
-	TypeMessage MessageType     `json:"type"`
-	Data        json.RawMessage `json:"data"`
-}
-
-type PrivateMessage struct {
-	ToUserID int    `json:"to_user_id"`
-	Content  string `json:"content"`
-}
-
-type GroupMessage struct {
-	GroupID int    `json:"group_id"`
-	Content string `json:"content"`
+// ReceiverID может быть как group_id, так и to_user_id
+// в зависимости от типа сообщения
+type NewMessage struct {
+	TypeMessage EventType `json:"type"`
+	Content     string    `json:"content"`
+	ReceiverID  int       `json:"receiver_id"`
 }
 
 type ProduceMessage struct {
-	MessageID   int         `json:"message_id"`
-	TypeMessage MessageType `json:"message_type"`
-	FromUserID  int         `json:"from_user_id"`
-	CreatedAt   time.Time   `json:"created_at"`
-
-	Content string `json:"content,omitempty"`
-	GroupID *int   `json:"group_id,omitempty"`
-
-	Payload json.RawMessage `json:"payload,omitempty"`
+	TypeMessage EventType       `json:"message_type"`
+	Data        json.RawMessage `json:"data,omitempty"`
 }
+
+// response
+type UserGroup struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type OnlineUsersWithLastTimestamp struct {
+	UserID     int
+	Timestampt time.Time
+}
+
+// events to client
+type Presence struct {
+	UserID    int       `json:"user_id"`
+	Presence  bool      `json:"presence"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type PrivateMessageEvent struct {
+	MessageID  int       `json:"message_id"`
+	FromUserID int       `json:"from_user_id"`
+	Content    string    `json:"content"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type GroupMessageEvent struct {
+	MessageID  int       `json:"message_id"`
+	GroupID    int       `json:"group_id"`
+	FromUserID int       `json:"from_user_id"`
+	Content    string    `json:"content"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// добавление, удаление и изменение прав
+type GroupChangeMemberStatusEvent struct {
+	MessageID int `json:"message_id"`
+	GroupID   int `json:"group_id"`
+	UserID    int `json:"user_id"`
+}
+
+type InvitedToGroupEvent struct {
+	GroupID     int `json:"group_id"`
+	InvitedByID int `json:"invited_by_id"`
+}
+
+// DTOs
 
 type UpdateGroupMemberRoleDTO struct {
 	Role    domain.GroupMemberRole
@@ -61,16 +95,4 @@ type PaginatePrivateMessagesDTO struct {
 type PaginateGroupMessagesDTO struct {
 	GroupID int
 	Cursor  *int
-}
-
-// response
-type UserGroup struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-}
-
-type Presence struct {
-	UserID    int       `json:"user_id"`
-	Presence  bool      `json:"presence"`
-	Timestamp time.Time `json:"timestamp"`
 }

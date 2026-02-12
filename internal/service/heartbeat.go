@@ -5,27 +5,57 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	defaultDelta                  = 5 * time.Second
+	defaultInterval               = pongWait
+	defaultOfflineScannerInterval = 15 * time.Second
+)
+
+type HeartbeatOption func(ho *HeartbeatService)
+
 type HeartbeatService struct {
-	connRepo ConnectionRepoIn
-	interval time.Duration
-	delta    time.Duration
-	timers   sync.Map
+	connRepo               ConnectionRepoIn
+	msgRepo                MessageRepoIn
+	offlineScannerInterval time.Duration
+	interval               time.Duration
+	delta                  time.Duration
 }
 
-func NewHeartbeatService(connRepo ConnectionRepoIn) HeartbeatServiceIn {
+func WithInterval(interval time.Duration) HeartbeatOption {
+	return func(ho *HeartbeatService) {
+		ho.interval = interval
+	}
+}
+
+func WithDelta(delta time.Duration) HeartbeatOption {
+	return func(ho *HeartbeatService) {
+		ho.delta = delta
+	}
+}
+
+func WithOfflineInterval(offlineScannerInterval time.Duration) HeartbeatOption {
+	return func(ho *HeartbeatService) {
+		ho.offlineScannerInterval = offlineScannerInterval
+	}
+}
+
+func NewHeartbeatService(ctx context.Context, connRepo ConnectionRepoIn, opts ...HeartbeatOption) HeartbeatServiceIn {
 	hs := &HeartbeatService{
 		connRepo: connRepo,
-		interval: pongWait,
-		delta:    5 * time.Second,
+		interval: defaultInterval,
+		delta:    defaultDelta,
 	}
 
-	go hs.offlineScanner(context.Background())
+	for _, opt := range opts {
+		opt(hs)
+	}
+
+	go hs.offlineScanner(ctx)
 
 	return hs
 }
@@ -35,7 +65,7 @@ func (hs *HeartbeatService) HandleHeartbeat(ctx context.Context, userID int) err
 
 	lastActive, err := hs.connRepo.GetOnlineStatus(ctx, userID)
 
-	wasOffline := err == redis.Nil || time.Since(lastActive) > (hs.interval-hs.delta)
+	wasOffline := err == redis.Nil || time.Since(lastActive) > (hs.interval+hs.delta)
 
 	hs.connRepo.UpdateOnlineStatus(ctx, &Presence{
 		UserID:    userID,
@@ -46,12 +76,11 @@ func (hs *HeartbeatService) HandleHeartbeat(ctx context.Context, userID int) err
 	if wasOffline {
 		hs.notifyPresenceChange(ctx, userID, true)
 	}
-
 	return nil
 }
 
 func (hs *HeartbeatService) offlineScanner(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(hs.offlineScannerInterval)
 	defer ticker.Stop()
 
 	for {
@@ -65,27 +94,22 @@ func (hs *HeartbeatService) offlineScanner(ctx context.Context) {
 }
 
 func (hs *HeartbeatService) checkOfflineUsers(ctx context.Context) {
-	onlineUsers, err := hs.connRepo.GetAllOnlineUsers(ctx)
+	onlineUsersWithTimestamp, err := hs.connRepo.GetAllOnlineUsers(ctx)
 	if err != nil {
 		slog.Error("Failed to get online users", "error", err)
 		return
 	}
 
-	threshold := hs.interval + hs.delta*2
+	threshold := hs.interval + 2*hs.delta
 	now := time.Now()
 
-	for _, userID := range onlineUsers {
-		lastActive, err := hs.connRepo.GetOnlineStatus(ctx, userID)
-		if err != nil {
-			continue
-		}
+	for _, user := range onlineUsersWithTimestamp {
+		if now.Sub(user.Timestampt) > threshold {
+			hs.connRepo.DeleteOnlineStatus(ctx, user.UserID)
 
-		if now.Sub(lastActive) > threshold {
-			hs.connRepo.DeleteOnlineStatus(ctx, userID)
+			hs.notifyPresenceChange(ctx, user.UserID, false)
 
-			hs.notifyPresenceChange(ctx, userID, false)
-
-			slog.Info("User went offline", "user_id", userID)
+			slog.Info("User went offline", "user_id", user.UserID)
 		}
 	}
 }
@@ -104,7 +128,7 @@ func (hs *HeartbeatService) notifyPresenceChange(ctx context.Context, userID int
 
 	msg := &ProduceMessage{
 		TypeMessage: PresenceChange,
-		Payload:     marshalData,
+		Data:        marshalData,
 	}
 
 	for _, recipientID := range interestedUsers {
@@ -114,7 +138,28 @@ func (hs *HeartbeatService) notifyPresenceChange(ctx context.Context, userID int
 }
 
 func (hs *HeartbeatService) getInterestedUsers(ctx context.Context, userID int) ([]int, error) {
-	return nil, nil
+	ids, err := hs.msgRepo.GetUserContacts(ctx, userID)
+	if err != nil {
+		slog.Error("Failed to get all user contacts", "error", err)
+		return nil, err
+	}
+
+	result := []int{}
+	now := time.Now()
+
+	for _, id := range ids {
+		timestamp, err := hs.connRepo.GetOnlineStatus(ctx, id)
+		if err != nil {
+			slog.Error("Failed to get online status", "error", err)
+			continue
+		}
+
+		threshold := hs.interval + 2*hs.delta
+		if now.Sub(timestamp) < threshold {
+			result = append(result, id)
+		}
+	}
+	return result, nil
 }
 
 func (hs *HeartbeatService) IsUserOnline(ctx context.Context, userID int) bool {
@@ -122,6 +167,5 @@ func (hs *HeartbeatService) IsUserOnline(ctx context.Context, userID int) bool {
 	if err != nil {
 		return false
 	}
-
-	return time.Since(lastActive) <= (hs.interval - hs.delta)
+	return time.Since(lastActive) <= (hs.interval + 2*hs.delta)
 }

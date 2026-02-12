@@ -3,8 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
-	"time"
+	"log/slog"
 
 	"github.com/ReilBleem13/MessangerV2/internal/domain"
 	"github.com/ReilBleem13/MessangerV2/internal/service"
@@ -24,7 +25,7 @@ func NewMessageRepo(db *sqlx.DB, cache *redis.Client) *MessageRepo {
 	}
 }
 
-func (mp *MessageRepo) NewMessage(ctx context.Context, fromUserID int, in *service.PrivateMessage) (int, error) {
+func (mp *MessageRepo) NewMessage(ctx context.Context, fromUserID int, in *service.NewMessage) (int, error) {
 	query := `
 		INSERT INTO messages (
 			from_user_id,
@@ -35,10 +36,9 @@ func (mp *MessageRepo) NewMessage(ctx context.Context, fromUserID int, in *servi
 		VALUES ($1, $2, $3, NOW())
 		RETURNING id;
 	`
-	fmt.Printf("тута")
+
 	var messageID int
-	err := mp.db.QueryRowContext(ctx, query, fromUserID, in.ToUserID, in.Content).Scan(&messageID)
-	fmt.Printf("снова тута")
+	err := mp.db.QueryRowContext(ctx, query, fromUserID, in.ReceiverID, in.Content).Scan(&messageID)
 	return messageID, err
 }
 
@@ -293,20 +293,13 @@ func (mp *MessageRepo) GetAllUndeliveredMessages(ctx context.Context, userID int
 func (mp *MessageRepo) PaginatePrivateMessages(ctx context.Context, userID1, userID2 int, cursor *int) ([]service.ProduceMessage, *int, bool, error) {
 	var query string
 	var err error
-	var messages []struct {
-		ID         int       `db:"id"`
-		FromUserID int       `db:"from_user_id"`
-		ToUserID   int       `db:"to_user_id"`
-		Content    string    `db:"content"`
-		CreatedAt  time.Time `db:"created_at"`
-	}
+	var messages []service.PrivateMessageEvent
 
 	if cursor == nil {
 		query = `
 			SELECT 
-				id,
+				id AS message_id,
 				from_user_id,
-				to_user_id,
 				content,
 				created_at
 			FROM messages
@@ -322,7 +315,7 @@ func (mp *MessageRepo) PaginatePrivateMessages(ctx context.Context, userID1, use
 	} else {
 		query = `
 			SELECT 
-				id,
+				id AS message_id,
 				from_user_id,
 				to_user_id,
 				content,
@@ -350,18 +343,22 @@ func (mp *MessageRepo) PaginatePrivateMessages(ctx context.Context, userID1, use
 
 	result := make([]service.ProduceMessage, len(messages))
 	for i, msg := range messages {
+
+		dataByte, err := json.Marshal(msg)
+		if err != nil {
+			slog.Error("Failed to marshal data", "error", err)
+			return nil, nil, false, err
+		}
+
 		result[i] = service.ProduceMessage{
-			MessageID:   msg.ID,
 			TypeMessage: service.PrivateMessageType,
-			FromUserID:  msg.FromUserID,
-			CreatedAt:   msg.CreatedAt,
-			Content:     msg.Content,
+			Data:        dataByte,
 		}
 	}
 
 	var nextCursor *int
 	if len(messages) > 0 {
-		lastID := messages[len(messages)-1].ID
+		lastID := messages[len(messages)-1].MessageID
 		nextCursor = &lastID
 	}
 	return result, nextCursor, hasMore, nil
@@ -370,18 +367,12 @@ func (mp *MessageRepo) PaginatePrivateMessages(ctx context.Context, userID1, use
 func (mp *MessageRepo) PaginateGroupMessages(ctx context.Context, groupID int, cursor *int) ([]service.ProduceMessage, *int, bool, error) {
 	var query string
 	var err error
-	var messages []struct {
-		ID         int       `db:"id"`
-		GroupID    int       `db:"group_id"`
-		FromUserID int       `db:"from_user_id"`
-		Content    string    `db:"content"`
-		CreatedAt  time.Time `db:"created_at"`
-	}
+	var messages []service.GroupMessageEvent
 
 	if cursor == nil {
 		query = `
 			SELECT 
-				id,
+				id AS message_id,
 				group_id,
 				from_user_id,
 				content,
@@ -395,7 +386,7 @@ func (mp *MessageRepo) PaginateGroupMessages(ctx context.Context, groupID int, c
 	} else {
 		query = `
 			SELECT 
-				id,
+				id AS message_id,
 				group_id,
 				from_user_id,
 				content,
@@ -418,19 +409,22 @@ func (mp *MessageRepo) PaginateGroupMessages(ctx context.Context, groupID int, c
 
 	result := make([]service.ProduceMessage, len(messages))
 	for i, msg := range messages {
+
+		dataByte, err := json.Marshal(msg)
+		if err != nil {
+			slog.Error("Failed to marshal data", "error", err)
+			return nil, nil, false, err
+		}
+
 		result[i] = service.ProduceMessage{
-			MessageID:   msg.ID,
 			TypeMessage: service.GroupMessageType,
-			GroupID:     &msg.GroupID,
-			FromUserID:  msg.FromUserID,
-			CreatedAt:   msg.CreatedAt,
-			Content:     msg.Content,
+			Data:        dataByte,
 		}
 	}
 
 	var nextCursor *int
 	if len(messages) > 0 {
-		lastID := messages[len(messages)-1].ID
+		lastID := messages[len(messages)-1].MessageID
 		nextCursor = &lastID
 	}
 	return result, nextCursor, hasMore, nil

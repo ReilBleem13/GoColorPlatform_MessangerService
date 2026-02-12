@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
-	"time"
 )
 
 // GROUPS
@@ -24,8 +24,8 @@ func (ms *MessageService) DeleteGroup(ctx context.Context, groupID, userID int) 
 	return nil
 }
 
-func (ms *MessageService) NewGroupMember(ctx context.Context, groupID, userID int) error {
-	messageID, err := ms.msgRepo.NewGroupMember(ctx, groupID, userID)
+func (ms *MessageService) NewGroupMember(ctx context.Context, groupID, invitedByID, invitedID int) error {
+	messageID, err := ms.msgRepo.NewGroupMember(ctx, groupID, invitedID)
 	if err != nil {
 		slog.Error("Failed to create new group member", "error", err)
 		return err
@@ -34,17 +34,42 @@ func (ms *MessageService) NewGroupMember(ctx context.Context, groupID, userID in
 	memberIDs, err := ms.msgRepo.GetAllGroupMembers(ctx, groupID)
 	if err != nil {
 		slog.Error("Failed to get all group members", "error", err)
-		return err
+		return nil
+	}
+
+	invitedEvent := InvitedToGroupEvent{
+		GroupID:     groupID,
+		InvitedByID: invitedByID,
+	}
+
+	invitedEventByte, err := json.Marshal(invitedEvent)
+	if err != nil {
+		slog.Error("Failed to marshal data", "error", err)
+		return nil
+	}
+
+	ms.handleProduce(ctx, invitedID, &ProduceMessage{
+		TypeMessage: InvitedToGroup,
+		Data:        invitedEventByte,
+	})
+
+	newMemberEvent := GroupChangeMemberStatusEvent{
+		MessageID: messageID,
+		GroupID:   groupID,
+		UserID:    invitedByID,
+	}
+
+	newMemberEventByte, err := json.Marshal(newMemberEvent)
+	if err != nil {
+		slog.Error("Failed to marshal data", "error", err)
+		return nil
 	}
 
 	for _, id := range memberIDs {
-		if id != userID {
+		if id != invitedByID {
 			ms.handleProduce(ctx, id, &ProduceMessage{
-				MessageID:   messageID,
-				TypeMessage: NewGroupMember,
-				FromUserID:  userID,
-				CreatedAt:   time.Now(),
-				GroupID:     &groupID,
+				TypeMessage: NewGroupMemberType,
+				Data:        newMemberEventByte,
 			})
 		}
 	}
@@ -64,14 +89,23 @@ func (ms *MessageService) DeleteGroupMember(ctx context.Context, groupID, userID
 		return err
 	}
 
+	data := GroupChangeMemberStatusEvent{
+		MessageID: messageID,
+		GroupID:   groupID,
+		UserID:    userID,
+	}
+
+	dataByte, err := json.Marshal(data)
+	if err != nil {
+		slog.Error("Failed to marshal data", "error", err)
+		return nil
+	}
+
 	for _, id := range memberIDs {
 		if id != userID {
 			ms.handleProduce(ctx, id, &ProduceMessage{
-				MessageID:   messageID,
-				TypeMessage: ExitGroupMember,
-				FromUserID:  userID,
-				CreatedAt:   time.Now(),
-				GroupID:     &groupID,
+				TypeMessage: MemberLeftGroupType,
+				Data:        dataByte,
 			})
 		}
 	}

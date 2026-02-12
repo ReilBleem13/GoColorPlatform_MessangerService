@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"log/slog"
 	"path/filepath"
@@ -38,6 +39,7 @@ func main() {
 	go service.GetHub().Run()
 
 	server := server.NewServer(
+		context.Background(),
 		server.WithMigrateDown(func() error {
 			return goose.DownTo(database.Client().DB, migrationsPath, 0)
 		}),
