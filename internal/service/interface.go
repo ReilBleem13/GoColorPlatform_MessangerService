@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/ReilBleem13/MessangerV2/internal/domain"
 	"github.com/redis/go-redis/v9"
@@ -27,11 +28,14 @@ type MessageRepoIn interface {
 }
 
 type ConnectionRepoIn interface {
-	Online(ctx context.Context, userID int) error
-	Offline(ctx context.Context, userID int) error
-	IsOnline(ctx context.Context, userID int) (bool, error)
 	Subscribe(ctx context.Context, userID int) *redis.PubSub
 	Produce(ctx context.Context, channel string, msg *ProduceMessage) error
+
+	UpdateOnlineStatus(ctx context.Context, in *Presence) error
+	GetOnlineStatus(ctx context.Context, userID int) (time.Time, error)
+
+	GetAllOnlineUsers(ctx context.Context) ([]int, error)
+	DeleteOnlineStatus(ctx context.Context, userID int)
 }
 
 type MessageServiceIn interface {
@@ -48,4 +52,9 @@ type MessageServiceIn interface {
 	NewGroupMessage(ctx context.Context, groupID, fromUserID int, content string) (int, error)
 	PaginatePrivateMessages(ctx context.Context, in *PaginatePrivateMessagesDTO) ([]ProduceMessage, *int, bool, error)
 	PaginateGroupMessages(ctx context.Context, in *PaginateGroupMessagesDTO) ([]ProduceMessage, *int, bool, error)
+}
+
+type HeartbeatServiceIn interface {
+	HandleHeartbeat(ctx context.Context, userID int) error
+	IsUserOnline(ctx context.Context, userID int) bool
 }

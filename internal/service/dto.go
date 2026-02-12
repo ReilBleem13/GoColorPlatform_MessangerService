@@ -16,8 +16,7 @@ const (
 	NewGroupMember  MessageType = "NEW_MEMBER"
 	ExitGroupMember MessageType = "EXIT_MEMBER"
 
-	UserOnlineStatus  MessageType = "USER_ONLINE"
-	UserOfflineStatus MessageType = "USER_OFFLINE"
+	PresenceChange MessageType = "PRESENCE_CHANGE"
 )
 
 type NewMessageRaw struct {
@@ -68,4 +67,10 @@ type PaginateGroupMessagesDTO struct {
 type UserGroup struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+type Presence struct {
+	UserID    int       `json:"user_id"`
+	Presence  bool      `json:"presence"`
+	Timestamp time.Time `json:"timestamp"`
 }
