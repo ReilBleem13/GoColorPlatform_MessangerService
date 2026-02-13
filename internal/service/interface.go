@@ -9,24 +9,20 @@ import (
 )
 
 type MessageRepoIn interface {
-	NewMessage(ctx context.Context, fromUserID int, in *NewMessage) (int, error)
-	UpdateMessageStatus(ctx context.Context, messageID int, status domain.MessageStatus) error
+	NewMessage(ctx context.Context, in *domain.Message) (int, error)
+	PaginateMessages(ctx context.Context, chatID int, cursor *int) ([]domain.Message, *int, bool, error)
+	GetAllUndeliveredMessages(ctx context.Context, userID int) ([]domain.Message, error)
+	UpdateMessageStatus(ctx context.Context, messageID, userID int, status domain.MessageStatus) error
 
-	NewGroup(ctx context.Context, name string, authorID int) (int, error)
-	DeleteGroup(ctx context.Context, userID, groupID int) error
+	NewGroupChat(ctx context.Context, name string, authorID int) (int, error)
+	DeleteGroupChat(ctx context.Context, chatID, authorID int) error
 
-	NewGroupMember(ctx context.Context, groupID, userID int) (int, error)
-	DeleteGroupMember(ctx context.Context, groupID int, userID int, typeMsg EventType) (int, error)
-	GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error)
+	NewGroupChatMember(ctx context.Context, chatID, userID int) (int, error)
+	DeleteGroupMember(ctx context.Context, chatID, userID int, typeDelete domain.EventType) (int, error)
+	GetAllChatMembers(ctx context.Context, chatID int) ([]int, error)
+	ChangeGroupChatMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
 
-	GetUserGroups(ctx context.Context, userID int) ([]UserGroup, error)
-	ChangeGroupMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
-
-	NewGroupMessage(ctx context.Context, groupID int, fromUserID int, content string) (int, error)
-	PaginateGroupMessages(ctx context.Context, groupID int, messageID *int) ([]ProduceMessage, *int, bool, error)
-	PaginatePrivateMessages(ctx context.Context, userID1, userID2 int, cursor *int) ([]ProduceMessage, *int, bool, error)
-
-	UpdateGroupMessageStatus(ctx context.Context, messageID, userID int, status domain.MessageStatus) error
+	GetUserChats(ctx context.Context, userID int) ([]domain.UserChat, error)
 	GetUserContacts(ctx context.Context, userID int) ([]int, error)
 }
 
@@ -44,19 +40,15 @@ type ConnectionRepoIn interface {
 type MessageServiceIn interface {
 	HandleConn(ctx context.Context, client *Client)
 
-	NewGroup(ctx context.Context, name string, authorID int) (int, error)
-	DeleteGroup(ctx context.Context, groupID, userID int) error
+	NewGroupChat(ctx context.Context, name string, authorID int) (int, error)
+	DeleteGroupChat(ctx context.Context, groupID, userID int) error
+	PaginateMessages(ctx context.Context, in *PaginateMessagesDTO) ([]domain.Message, *int, bool, error)
 
+	GetUserChats(ctx context.Context, userID int) ([]domain.UserChat, error)
 	NewGroupMember(ctx context.Context, in *GroupMemberDTO) error
 	DeleteGroupMember(ctx context.Context, in *GroupMemberDTO) error
-	GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error)
-
-	GetUserGroups(ctx context.Context, userID int) ([]UserGroup, error)
+	GetAllGroupChatMembers(ctx context.Context, chatID int) ([]int, error)
 	ChangeGroupMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
-
-	NewGroupMessage(ctx context.Context, groupID, fromUserID int, content string) (int, error)
-	PaginatePrivateMessages(ctx context.Context, in *PaginatePrivateMessagesDTO) ([]ProduceMessage, *int, bool, error)
-	PaginateGroupMessages(ctx context.Context, in *PaginateGroupMessagesDTO) ([]ProduceMessage, *int, bool, error)
 }
 
 type HeartbeatServiceIn interface {

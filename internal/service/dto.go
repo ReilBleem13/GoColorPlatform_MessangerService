@@ -7,46 +7,15 @@ import (
 	"github.com/ReilBleem13/MessangerV2/internal/domain"
 )
 
-type EventType string
-
-const (
-	PrivateMessageType EventType = "PRIVATE_MESSAGE"
-	GroupMessageType   EventType = "GROUP_MESSAGE"
-
-	NewMemberType    EventType = "NEW_MEMBER"
-	LeftMemberType   EventType = "LEFT_MEMBER"
-	KickedMemberType EventType = "KICKED_MEMBER"
-
-	// Ивенты для отправки конкретному пользователю
-	// тому кого добавили, или тому кого кикнули
-	InvitedToGroup   EventType = "INVITED_TO_GROUP"
-	DeletedFromGroup EventType = "DELETED_FROM_GROUP"
-
-	PresenceChange EventType = "PRESENCE_CHANGE"
-)
-
-// ReceiverID может быть как group_id, так и to_user_id
-// в зависимости от типа сообщения
 type NewMessage struct {
-	TypeMessage EventType `json:"type"`
-	Content     string    `json:"content"`
-	ReceiverID  int       `json:"receiver_id"`
+	Type    domain.ChatType `json:"type"`
+	ChatID  int             `json:"chat_id"`
+	Content string          `json:"content"`
 }
 
 type ProduceMessage struct {
-	TypeMessage EventType       `json:"message_type"`
-	Data        json.RawMessage `json:"data,omitempty"`
-}
-
-// response
-type UserGroup struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-}
-
-type OnlineUsersWithLastTimestamp struct {
-	UserID     int
-	Timestampt time.Time
+	Type domain.EventType `json:"type"`
+	Data json.RawMessage  `json:"data,omitempty"`
 }
 
 // events to client
@@ -56,17 +25,10 @@ type Presence struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-type PrivateMessageEvent struct {
+type MessageEvent struct {
 	MessageID  int       `json:"message_id"`
 	FromUserID int       `json:"from_user_id"`
-	Content    string    `json:"content"`
-	CreatedAt  time.Time `json:"created_at"`
-}
-
-type GroupMessageEvent struct {
-	MessageID  int       `json:"message_id"`
-	GroupID    int       `json:"group_id"`
-	FromUserID int       `json:"from_user_id"`
+	ChatID     int       `json:"chat_id"`
 	Content    string    `json:"content"`
 	CreatedAt  time.Time `json:"created_at"`
 }
@@ -87,23 +49,28 @@ type GroupMemberDTO struct {
 	GroupID   int
 	SubjectID int
 	ObjectID  int
-	Type      *EventType
+	Type      *domain.EventType
 }
 
 type UpdateGroupMemberRoleDTO struct {
-	Role    domain.GroupMemberRole
-	GroupID int
-	UserID  int
+	Role   domain.GroupMemberRole
+	ChatID int
+	UserID int
 }
 
-type PaginatePrivateMessagesDTO struct {
-	User1  int
-	User2  int
+type PaginateMessagesDTO struct {
+	UserID int
+	ChatID int
 	Cursor *int
 }
 
-type PaginateGroupMessagesDTO struct {
-	UserID  int
-	GroupID int
-	Cursor  *int
+// response
+type UserGroup struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type OnlineUsersWithLastTimestamp struct {
+	UserID     int
+	Timestampt time.Time
 }

@@ -24,13 +24,13 @@ func AuthMiddleware(secret string) func(http.Handler) http.Handler {
 
 			tokenString, err := utils.ExtractToken(authHeader)
 			if err != nil {
-				hadleError(w, err)
+				handleError(w, err)
 				return
 			}
 
 			claims, err := utils.ValidateAccessToken(tokenString, secret)
 			if err != nil {
-				hadleError(w, err)
+				handleError(w, err)
 				return
 			}
 

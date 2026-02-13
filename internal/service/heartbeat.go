@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/ReilBleem13/MessangerV2/internal/domain"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -56,7 +57,6 @@ func NewHeartbeatService(ctx context.Context, connRepo ConnectionRepoIn, opts ..
 	}
 
 	go hs.offlineScanner(ctx)
-
 	return hs
 }
 
@@ -100,16 +100,14 @@ func (hs *HeartbeatService) checkOfflineUsers(ctx context.Context) {
 		return
 	}
 
-	threshold := hs.interval + 2*hs.delta
 	now := time.Now()
+	threshold := hs.interval + 2*hs.delta
 
 	for _, user := range onlineUsersWithTimestamp {
 		if now.Sub(user.Timestampt) > threshold {
 			hs.connRepo.DeleteOnlineStatus(ctx, user.UserID)
-
 			hs.notifyPresenceChange(ctx, user.UserID, false)
-
-			slog.Info("User went offline", "user_id", user.UserID)
+			slog.Debug("User went offline", "user_id", user.UserID)
 		}
 	}
 }
@@ -127,8 +125,8 @@ func (hs *HeartbeatService) notifyPresenceChange(ctx context.Context, userID int
 	})
 
 	msg := &ProduceMessage{
-		TypeMessage: PresenceChange,
-		Data:        marshalData,
+		Type: domain.PresenceChangeType,
+		Data: marshalData,
 	}
 
 	for _, recipientID := range interestedUsers {

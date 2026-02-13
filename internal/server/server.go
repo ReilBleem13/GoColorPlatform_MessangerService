@@ -58,16 +58,15 @@ func (s *Server) setupRoutes(h *Handler) {
 
 	authMiddleware := AuthMiddleware(s.cfg.JWT.Secret)
 
-	s.router.Handle("POST /groups", authMiddleware(http.HandlerFunc(h.handleNewGroup)))
-	s.router.Handle("DELETE /groups/{group_id}", authMiddleware(http.HandlerFunc(h.handleDeleteGroup)))
-	s.router.Handle("POST /groups/{group_id}/members", authMiddleware(http.HandlerFunc(h.handleNewGroupMember)))
-	s.router.Handle("DELETE /groups/{group_id}/members/{user_id}", authMiddleware(http.HandlerFunc(h.handleDeleteGroupMember)))
-	s.router.Handle("PATCH /groups/{group_id}/members/{user_id}", authMiddleware(http.HandlerFunc(h.handleUpdateGroupMemberRole)))
-	s.router.Handle("GET /groups/{group_id}/members", authMiddleware(http.HandlerFunc(h.handleGetGroupMembers)))
-	s.router.Handle("GET /groups/{group_id}/chat", authMiddleware(http.HandlerFunc(h.handlePaginateGroupMessages)))
+	s.router.Handle("POST /chats", authMiddleware(http.HandlerFunc(h.handleNewGroup)))
+	s.router.Handle("DELETE /chats/{chat_id}", authMiddleware(http.HandlerFunc(h.handleDeleteGroup)))
+	s.router.Handle("POST /chats/{chat_id}/members", authMiddleware(http.HandlerFunc(h.handleNewGroupMember)))
+	s.router.Handle("DELETE /chats/{chat_id}/members/{user_id}", authMiddleware(http.HandlerFunc(h.handleDeleteGroupMember)))
+	s.router.Handle("PATCH /chats/{chat_id}/members/{user_id}", authMiddleware(http.HandlerFunc(h.handleUpdateGroupMemberRole)))
+	s.router.Handle("GET /chats/{chat_id}/members", authMiddleware(http.HandlerFunc(h.handleGetGroupMembers)))
 
-	s.router.Handle("GET /users/groups", authMiddleware(http.HandlerFunc(h.handleGetUserGroups)))
-	s.router.Handle("GET /users/chat/{chat_id}", authMiddleware(http.HandlerFunc(h.handlePaginatePrivateMessages)))
+	s.router.Handle("GET /users/chats", authMiddleware(http.HandlerFunc(h.handleGetUserGroups)))
+	s.router.Handle("GET /users/chat/{chat_id}", authMiddleware(http.HandlerFunc(h.handlePaginateMessages)))
 
 	fileServer := http.FileServer(http.Dir("./web"))
 	s.router.Handle("/", http.StripPrefix("/", fileServer))

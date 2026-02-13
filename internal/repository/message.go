@@ -3,9 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"github.com/ReilBleem13/MessangerV2/internal/domain"
 	"github.com/ReilBleem13/MessangerV2/internal/service"
@@ -25,36 +23,8 @@ func NewMessageRepo(db *sqlx.DB, cache *redis.Client) *MessageRepo {
 	}
 }
 
-func (mp *MessageRepo) NewMessage(ctx context.Context, fromUserID int, in *service.NewMessage) (int, error) {
-	query := `
-		INSERT INTO messages (
-			from_user_id,
-			to_user_id,
-			content,
-			created_at
-		)
-		VALUES ($1, $2, $3, NOW())
-		RETURNING id;
-	`
-
-	var messageID int
-	err := mp.db.QueryRowContext(ctx, query, fromUserID, in.ReceiverID, in.Content).Scan(&messageID)
-	return messageID, err
-}
-
-func (mp *MessageRepo) UpdateMessageStatus(ctx context.Context, messageID int, status domain.MessageStatus) error {
-	query := `
-		UPDATE messages
-		SET status = $1
-		WHERE id = $2;
-	`
-
-	_, err := mp.db.ExecContext(ctx, query, string(status), messageID)
-	return err
-}
-
-// groups
-func (mp *MessageRepo) NewGroup(ctx context.Context, name string, authorID int) (int, error) {
+// To add messages from private chats and group chats.
+func (mp *MessageRepo) NewMessage(ctx context.Context, in *domain.Message) (int, error) {
 	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
@@ -62,23 +32,92 @@ func (mp *MessageRepo) NewGroup(ctx context.Context, name string, authorID int) 
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO groups (name, author_id) 
-		VALUES ($1, $2)
+		INSERT INTO messages (
+			chat_id,
+			from_user_id,
+			message_type,
+			content
+		)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id;
+	`
+
+	var messageID int
+	err = tx.QueryRowContext(ctx, query,
+		in.ChatID,
+		in.FromUserID,
+		string(in.MessageType),
+		in.Content,
+	).Scan(&messageID)
+	if err != nil {
+		return 0, err
+	}
+
+	members, err := mp.getAllChatMembersWithExecutor(ctx, tx, in.ChatID)
+	if err != nil {
+		return 0, err
+	}
+
+	statusQuery := `
+		INSERT INTO message_status (
+			message_id, 
+			user_id, 
+			status
+		)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (message_id, user_id) DO NOTHING;
+	`
+
+	for _, memberID := range members {
+		_, err := tx.ExecContext(ctx, statusQuery,
+			messageID,
+			memberID,
+			string(domain.StatusSent),
+		)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return messageID, nil
+}
+
+func (mp *MessageRepo) NewGroupChat(ctx context.Context, name string, authorID int) (int, error) {
+	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	query := `
+		INSERT INTO chats (type, name, author_id) 
+		VALUES ($1, $2, $3)
 		RETURNING id;
 	`
 
 	var groupID int
-	err = tx.QueryRowContext(ctx, query, name, authorID).Scan(&groupID)
+	err = tx.QueryRowContext(ctx, query,
+		string(domain.Group),
+		name,
+		authorID,
+	).Scan(&groupID)
 	if err != nil {
 		return 0, err
 	}
 
 	query = `
-		INSERT INTO group_members (group_id, user_id, role)
-		VALUES ($1, $2, 'ADMIN');
+		INSERT INTO chat_members (chat_id, user_id, role)
+		VALUES ($1, $2, $3);
 	`
 
-	_, err = tx.ExecContext(ctx, query, groupID, authorID)
+	_, err = tx.ExecContext(ctx, query,
+		groupID,
+		authorID,
+		string(domain.AdminRole),
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -89,12 +128,16 @@ func (mp *MessageRepo) NewGroup(ctx context.Context, name string, authorID int) 
 	return groupID, err
 }
 
-func (mp *MessageRepo) DeleteGroup(ctx context.Context, userID, groupID int) error {
+func (mp *MessageRepo) DeleteGroupChat(ctx context.Context, chatID, authorID int) error {
 	query := `
-		DELETE FROM groups WHERE id = $1 AND author_id = $2;
+		DELETE FROM chats 
+		WHERE id = $1 AND author_id = $2;
 	`
 
-	res, err := mp.db.ExecContext(ctx, query, groupID, userID)
+	res, err := mp.db.ExecContext(ctx, query,
+		chatID,
+		authorID,
+	)
 	if err != nil {
 		return err
 	}
@@ -105,12 +148,12 @@ func (mp *MessageRepo) DeleteGroup(ctx context.Context, userID, groupID int) err
 	}
 
 	if rowsAff == 0 {
-		return fmt.Errorf("user %d is not author %d group", userID, groupID)
+		return fmt.Errorf("user %d is not author of %d group chat", authorID, chatID)
 	}
 	return nil
 }
 
-func (mp *MessageRepo) NewGroupMember(ctx context.Context, groupID, userID int) (int, error) {
+func (mp *MessageRepo) NewGroupChatMember(ctx context.Context, chatID, userID int) (int, error) {
 	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
@@ -118,357 +161,285 @@ func (mp *MessageRepo) NewGroupMember(ctx context.Context, groupID, userID int) 
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO group_members (group_id, user_id)
+		INSERT INTO chat_members (chat_id, user_id)
 		VALUES ($1, $2);
 	`
 
-	_, err = tx.ExecContext(ctx, query, groupID, userID)
+	_, err = tx.ExecContext(ctx, query,
+		chatID,
+		userID,
+	)
 	if err != nil {
 		return 0, err
 	}
 
 	query = `
-		INSERT INTO group_messages (group_id, from_user_id, message_type)
-		VALUES ($1, $2, 'NEW_MEMBER')
-		RETURNING id;
-	`
-
-	var messageID int
-	err = tx.QueryRowContext(ctx, query, groupID, userID).Scan(&messageID)
-	if err != nil {
-		return 0, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return messageID, nil
-}
-
-func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, groupID int, userID int, typeMsg service.EventType) (int, error) {
-	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-
-	query := `
-		DELETE FROM group_members WHERE group_id = $1 AND user_id = $2;
-	`
-
-	_, err = tx.ExecContext(ctx, query, groupID, userID)
-	if err != nil {
-		return 0, err
-	}
-
-	query = `
-		INSERT INTO group_messages (group_id, from_user_id, message_type)
-		VALUES($1, $2, $3)
-		RETURNING id;
-	`
-
-	var messageID int
-	err = tx.QueryRowContext(ctx, query, groupID, userID, string(typeMsg)).Scan(&messageID)
-	if err != nil {
-		return 0, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return messageID, nil
-}
-
-func (mp *MessageRepo) GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error) {
-	query := `
-		SELECT user_id FROM group_members WHERE group_id = $1
-	`
-
-	var groupMembersIDs []int
-	err := mp.db.SelectContext(ctx, &groupMembersIDs, query, groupID)
-	if err != nil {
-		return nil, err
-	}
-	return groupMembersIDs, nil
-}
-
-func (mp *MessageRepo) GetUserGroups(ctx context.Context, userID int) ([]service.UserGroup, error) {
-	query := `
-		SELECT g.id, g.name 
-		FROM groups g
-		JOIN group_members gm ON g.id = gm.group_id
-		WHERE gm.user_id = $1
-		ORDER BY g.created_at DESC
-	`
-
-	var userGroups []service.UserGroup
-	err := mp.db.SelectContext(ctx, &userGroups, query, userID)
-	if err != nil {
-		return nil, err
-	}
-	return userGroups, nil
-}
-
-func (mp *MessageRepo) ChangeGroupMemberRole(ctx context.Context, in *service.UpdateGroupMemberRoleDTO) error {
-	query := `
-		UPDATE group_members SET role = $1
-		WHERE group_id = $2 AND user_id = $3
-	`
-
-	_, err := mp.db.ExecContext(ctx, query, string(in.Role), in.GroupID, in.UserID)
-	return err
-}
-
-func (mp *MessageRepo) NewGroupMessage(ctx context.Context, groupID int, fromUserID int, content string) (int, error) {
-	query := `
-		INSERT INTO group_messages (group_id, from_user_id, content)
+		INSERT INTO messages (chat_id, from_user_id, message_type)
 		VALUES ($1, $2, $3)
 		RETURNING id;
 	`
 
-	var groupMessageID int
-	err := mp.db.QueryRowContext(ctx, query, groupID, fromUserID, content).Scan(&groupMessageID)
+	var messageID int
+	err = tx.QueryRowContext(ctx, query,
+		chatID,
+		userID,
+		string(domain.NewMemberType),
+	).Scan(&messageID)
 	if err != nil {
 		return 0, err
 	}
 
-	members, err := mp.GetAllGroupMembers(ctx, groupID)
+	members, err := mp.GetAllChatMembers(ctx, chatID)
 	if err != nil {
-		return groupMessageID, err
+		return 0, err
 	}
 
 	statusQuery := `
-		INSERT INTO group_message_status (message_id, user_id, status)
-		VALUES ($1, $2, 'SENT')
+		INSERT INTO message_status (message_id, user_id, status)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (message_id, user_id) DO NOTHING;
 	`
 
 	for _, memberID := range members {
-		_, err := mp.db.ExecContext(ctx, statusQuery, groupMessageID, memberID)
+		_, err := tx.ExecContext(ctx, statusQuery,
+			messageID,
+			memberID,
+			string(domain.StatusSent),
+		)
 		if err != nil {
 			return 0, err
 		}
 	}
 
-	return groupMessageID, nil
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return messageID, nil
 }
 
-func (mp *MessageRepo) GetAllUndeliveredMessages(ctx context.Context, userID int) ([]service.ProduceMessage, error) {
+// typeDelete => LeftMemberType или KickedMemberType
+func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, chatID, userID int, typeDelete domain.EventType) (int, error) {
+	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
 	query := `
-		SELECT 
-			m.id AS message_id,
-			'PRIVATE_MESSAGE'::TEXT AS messsage_type,
-			m.from_user_id,
-			NULL::INT AS group_id,
-			m.content,
-			m.created_at
-		FROM messages m
-		WHERE m.to_user_id = $1 
-			AND m.status = 'SENT'
-
-		UNION ALL
-
-		SELECT 
-			gm.id as message_id,
-			'GROUP_MESSAGE'::TEXT AS message_type,
-			gm.from_user_id,
-			gm.group_id,
-			gm.content,
-			gm.created_at
-		FROM group_messages gm 
-		JOIN group_message_status gms ON gms.message_id = gm_id
-		WHERE gms.user_id = $1 AND gms.status = 'SENT'
-
-		ORDER BY created_at ASC;
+		DELETE FROM chat_members 
+		WHERE chat_id = $1 AND user_id = $2;
 	`
 
-	var messages []service.ProduceMessage
-	err := mp.db.SelectContext(ctx, &messages, query, userID)
+	_, err = tx.ExecContext(ctx, query,
+		chatID,
+		userID,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	query = `
+		INSERT INTO messages (chat_id, from_user_id, message_type)
+		VALUES($1, $2, $3)
+		RETURNING id;
+	`
+
+	var messageID int
+	err = tx.QueryRowContext(ctx, query,
+		chatID,
+		userID,
+		string(typeDelete),
+	).Scan(&messageID)
+	if err != nil {
+		return 0, err
+	}
+
+	members, err := mp.GetAllChatMembers(ctx, chatID)
+	if err != nil {
+		return 0, err
+	}
+
+	statusQuery := `
+		INSERT INTO message_status (message_id, user_id, status)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (message_id, user_id) DO NOTHING;
+	`
+
+	for _, memberID := range members {
+		_, err := tx.ExecContext(ctx, statusQuery,
+			messageID,
+			memberID,
+			string(domain.StatusSent),
+		)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return messageID, nil
+}
+
+func (mp *MessageRepo) GetAllChatMembers(ctx context.Context, chatID int) ([]int, error) {
+	return mp.getAllChatMembersWithExecutor(ctx, mp.db, chatID)
+}
+
+func (mp *MessageRepo) getAllChatMembersWithExecutor(ctx context.Context, executor sqlx.ExtContext, chatID int) ([]int, error) {
+	query := `
+		SELECT user_id
+		FROM chat_members WHERE chat_id = $1
+	`
+
+	var chatMembersIDs []int
+	err := sqlx.SelectContext(ctx, executor, &chatMembersIDs, query,
+		chatID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return chatMembersIDs, nil
+}
+
+func (mp *MessageRepo) GetUserChats(ctx context.Context, userID int) ([]domain.UserChat, error) {
+	query := `
+		SELECT 
+			c.id,
+			c.type, 
+			c.name, 
+			c.author_id, 
+			c.created_at
+		FROM chats c
+		JOIN chat_members cm ON cm.chat_id = c.id
+		WHERE cm.user_id = $1
+		ORDER BY c.updated_at DESC
+	`
+
+	var userChats []domain.UserChat
+	err := mp.db.SelectContext(ctx, &userChats, query,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return userChats, nil
+}
+
+func (mp *MessageRepo) ChangeGroupChatMemberRole(ctx context.Context, in *service.UpdateGroupMemberRoleDTO) error {
+	query := `
+		UPDATE chat_members 
+			SET role = $1
+		WHERE chat_id = $2 AND user_id = $3
+	`
+
+	_, err := mp.db.ExecContext(ctx, query,
+		string(in.Role),
+		in.ChatID,
+		in.UserID,
+	)
+	return err
+}
+
+func (mp *MessageRepo) GetAllUndeliveredMessages(ctx context.Context, userID int) ([]domain.Message, error) {
+	query := `
+		SELECT 
+			m.id,
+			m.chat_id,
+			m.from_user_id,
+			m.message_type,
+			m.content,
+			m.created_at
+		FROM messages m 
+		JOIN message_status ms ON ms.message_id = m.id 
+		WHERE ms.user_id = $1 AND ms.status = $2
+		ORDER BY id DESC
+	`
+	var messages []domain.Message
+	err := mp.db.SelectContext(ctx, &messages, query,
+		userID,
+		string(domain.StatusSent),
+	)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
 	return messages, nil
 }
 
-func (mp *MessageRepo) PaginatePrivateMessages(ctx context.Context, userID1, userID2 int, cursor *int) ([]service.ProduceMessage, *int, bool, error) {
-	var query string
-	var err error
-	var messages []service.PrivateMessageEvent
-
-	if cursor == nil {
-		query = `
-			SELECT 
-				id AS message_id,
-				from_user_id,
-				content,
-				created_at
-			FROM messages
-			WHERE (
-				(from_user_id = $1 AND to_user_id = $2)
-				OR
-				(from_user_id = $2 AND to_user_id = $1)
-			)
-			ORDER BY id DESC
-			LIMIT 21;
-		`
-		err = mp.db.SelectContext(ctx, &messages, query, userID1, userID2)
-	} else {
-		query = `
-			SELECT 
-				id AS message_id,
-				from_user_id,
-				to_user_id,
-				content,
-				created_at
-			FROM messages
-			WHERE (
-				(from_user_id = $1 AND to_user_id = $2)
-				OR
-				(from_user_id = $2 AND to_user_id = $1)
-			)
-			AND id < $3
-			ORDER BY id DESC
-			LIMIT 21;
-		`
-		err = mp.db.SelectContext(ctx, &messages, query, userID1, userID2, *cursor)
-	}
-	if err != nil && err != sql.ErrNoRows {
-		return nil, nil, false, err
-	}
-
-	hasMore := len(messages) > 20
-	if hasMore {
-		messages = messages[:20]
-	}
-
-	result := make([]service.ProduceMessage, len(messages))
-	for i, msg := range messages {
-
-		dataByte, err := json.Marshal(msg)
-		if err != nil {
-			slog.Error("Failed to marshal data", "error", err)
-			return nil, nil, false, err
-		}
-
-		result[i] = service.ProduceMessage{
-			TypeMessage: service.PrivateMessageType,
-			Data:        dataByte,
-		}
-	}
-
-	var nextCursor *int
-	if len(messages) > 0 {
-		lastID := messages[len(messages)-1].MessageID
-		nextCursor = &lastID
-	}
-	return result, nextCursor, hasMore, nil
-}
-
-func (mp *MessageRepo) PaginateGroupMessages(ctx context.Context, groupID int, cursor *int) ([]service.ProduceMessage, *int, bool, error) {
-	var query string
-	var err error
-	var messages []service.GroupMessageEvent
-
-	if cursor == nil {
-		query = `
-			SELECT 
-				id AS message_id,
-				group_id,
-				from_user_id,
-				content,
-				created_at
-			FROM group_messages
-			WHERE group_id = $1
-			ORDER BY id DESC
-			LIMIT 21;
-		`
-		err = mp.db.SelectContext(ctx, &messages, query, groupID)
-	} else {
-		query = `
-			SELECT 
-				id AS message_id,
-				group_id,
-				from_user_id,
-				content,
-				created_at
-			FROM group_messages
-			WHERE group_id = $1 AND id < $2
-			ORDER BY id DESC
-			LIMIT 21;
-		`
-		err = mp.db.SelectContext(ctx, &messages, query, groupID, *cursor)
-	}
-	if err != nil && err != sql.ErrNoRows {
-		return nil, nil, false, err
-	}
-
-	hasMore := len(messages) > 20
-	if hasMore {
-		messages = messages[:20]
-	}
-
-	result := make([]service.ProduceMessage, len(messages))
-	for i, msg := range messages {
-
-		dataByte, err := json.Marshal(msg)
-		if err != nil {
-			slog.Error("Failed to marshal data", "error", err)
-			return nil, nil, false, err
-		}
-
-		result[i] = service.ProduceMessage{
-			TypeMessage: service.GroupMessageType,
-			Data:        dataByte,
-		}
-	}
-
-	var nextCursor *int
-	if len(messages) > 0 {
-		lastID := messages[len(messages)-1].MessageID
-		nextCursor = &lastID
-	}
-	return result, nextCursor, hasMore, nil
-}
-
-func (mp *MessageRepo) UpdateGroupMessageStatus(ctx context.Context, messageID, userID int, status domain.MessageStatus) error {
+func (mp *MessageRepo) PaginateMessages(ctx context.Context, chatID int, cursor *int) ([]domain.Message, *int, bool, error) {
 	query := `
-		UPDATE group_message_status SET status = $1
-		WHERE message_id = $2 AND user_id = $3;
+		SELECT 
+			id,
+			chat_id,
+			from_user_id,
+			message_type,
+			content,
+			created_at
+		FROM messages 
+		WHERE chat_id = $1 
+			AND ($2 IS NULL OR id < $2)
+		ORDER BY id DESC
+		LIMIT 21
 	`
 
-	res, err := mp.db.ExecContext(ctx, query, string(status), messageID, userID)
-	if err != nil {
-		return err
+	var messages []domain.Message
+	err := mp.db.SelectContext(ctx, &messages, query,
+		chatID,
+		cursor,
+	)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, nil, false, err
 	}
 
-	rowsAff, err := res.RowsAffected()
-	if err != nil {
-		return err
+	hasMore := len(messages) > 20
+	if hasMore {
+		messages = messages[:20]
 	}
 
-	if rowsAff == 0 {
-		return fmt.Errorf("group or user not found")
+	var nextCursor *int
+	if len(messages) > 0 {
+		lastID := messages[len(messages)-1].ID
+		nextCursor = &lastID
+	}
+	return messages, nextCursor, hasMore, nil
+}
+
+func (mp *MessageRepo) UpdateMessageStatus(ctx context.Context, messageID, userID int, status domain.MessageStatus) error {
+	query := `
+		UPDATE message_status
+			SET status = $1
+		WHERE message_id = $2 
+			AND user_id = $3;
+	`
+
+	_, err := mp.db.ExecContext(ctx, query,
+		string(status),
+		messageID,
+		userID,
+	)
+	if err != nil {
+		return err
 	}
 	return nil
 }
 
 func (mp *MessageRepo) GetUserContacts(ctx context.Context, userID int) ([]int, error) {
 	query := `
-		SELECT DISTINCT to_user_id AS contact_id
-		FROM messages
-		WHERE from_user_id = $1
-		
-		UNION
-		
-		SELECT DISTINCT from_user_id AS contact_id
-		FROM messages
-		WHERE to_user_id = $1
-		
-		ORDER BY contact_id;
+		SELECT 
+			cm2.user_id
+		FROM chats c
+		JOIN chat_members cm ON cm.chat_id = c.id
+		JOIN chat_members cm2 ON cm2.chat_id = c.id
+		WHERE c.type = $1
+			AND cm.user_id = $2
+			AND cm2.user_id != $2
 	`
 
 	var contacts []int
-	err := mp.db.SelectContext(ctx, &contacts, query, userID)
+	err := mp.db.SelectContext(ctx, &contacts, query,
+		domain.Private,
+		userID,
+	)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}

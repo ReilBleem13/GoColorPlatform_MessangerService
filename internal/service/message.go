@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"time"
 
@@ -91,67 +90,30 @@ func (ms *MessageService) read(ctx context.Context, client *Client) error {
 				return context.Canceled
 			}
 
-			switch newMessage.TypeMessage {
-			case PrivateMessageType:
-				ms.handlePrivateMessage(ctx, client, &newMessage)
-
-			case GroupMessageType:
-				ms.handleGroupMessage(ctx, client, &newMessage)
-
-			default:
-				slog.Error("Failed to define type message",
-					"user_id", client.id,
-					"type", newMessage.TypeMessage,
-				)
-				return domain.ErrInvalidRequest
-			}
+			ms.handleSendMessage(ctx, client, &newMessage)
 		}
 	}
 }
 
-func (ms *MessageService) handlePrivateMessage(ctx context.Context, client *Client, msg *NewMessage) {
-	messageID, err := ms.msgRepo.NewMessage(ctx, client.id, msg)
-	if err != nil {
-		log.Printf("Failed to save message to DB for user %d: %v", client.id, err)
-	}
-
-	data := PrivateMessageEvent{
-		MessageID:  messageID,
-		FromUserID: client.id,
-		Content:    msg.Content,
-		CreatedAt:  time.Now(),
-	}
-
-	dataByte, err := json.Marshal(data)
-	if err != nil {
-		slog.Error("Failed to marshal data", "error", err)
-		return
-	}
-
-	ms.handleProduce(ctx, msg.ReceiverID, &ProduceMessage{
-		TypeMessage: PrivateMessageType,
-		Data:        dataByte,
+func (ms *MessageService) handleSendMessage(ctx context.Context, client *Client, msgToSend *NewMessage) {
+	messageID, err := ms.msgRepo.NewMessage(ctx, &domain.Message{
+		ChatID:      msgToSend.ChatID,
+		FromUserID:  client.id,
+		MessageType: domain.MessageType,
+		Content:     &msgToSend.Content,
 	})
-}
-
-func (ms *MessageService) handleGroupMessage(ctx context.Context, client *Client, msg *NewMessage) {
-	messageID, err := ms.msgRepo.NewGroupMessage(ctx, msg.ReceiverID, client.id, msg.Content)
 	if err != nil {
-		slog.Error("Failed to save message to DB", "user_id", client.id, "error", err)
-		return
+		slog.Error("Failed to save message to DB",
+			"error", err,
+			"client_id", client.id,
+		)
 	}
 
-	groupMembersIDs, err := ms.msgRepo.GetAllGroupMembers(ctx, msg.ReceiverID)
-	if err != nil {
-		slog.Error("Failed tp get all group members", "error", err)
-		return
-	}
-
-	data := GroupMessageEvent{
+	data := MessageEvent{
 		MessageID:  messageID,
-		GroupID:    msg.ReceiverID,
 		FromUserID: client.id,
-		Content:    msg.Content,
+		ChatID:     msgToSend.ChatID,
+		Content:    msgToSend.Content,
 		CreatedAt:  time.Now(),
 	}
 
@@ -161,35 +123,31 @@ func (ms *MessageService) handleGroupMessage(ctx context.Context, client *Client
 		return
 	}
 
-	produceMsg := &ProduceMessage{
-		TypeMessage: GroupMessageType,
-		Data:        dataByte,
+	chatMemberIDs, err := ms.msgRepo.GetAllChatMembers(ctx, msgToSend.ChatID)
+	if err != nil {
+		slog.Error("Failed to get all chat members", "error", err)
+		return
 	}
 
-	for _, memberID := range groupMembersIDs {
+	for _, memberID := range chatMemberIDs {
 		if memberID != client.id {
-			ms.handleProduce(ctx, memberID, produceMsg)
+			ms.handleProduce(ctx, memberID, &ProduceMessage{
+				Type: domain.MessageType,
+				Data: dataByte,
+			})
 		}
 	}
 }
 
-func (ms *MessageService) handleProduce(ctx context.Context, toUserID int, msg *ProduceMessage) {
-	timestamp, err := ms.connRepo.GetOnlineStatus(ctx, toUserID)
-	if err != nil {
-		slog.Error("Failed to get online status", "error", err, "to_user_id", toUserID)
-		return
-	}
-
-	threshold := defaultInterval + 2*defaultDelta
-	now := time.Now()
-
-	if now.Sub(timestamp) > threshold {
+func (ms *MessageService) handleProduce(ctx context.Context, toUserID int, msgToSend *ProduceMessage) {
+	if !ms.heartbeatService.IsUserOnline(ctx, toUserID) {
+		slog.Debug("User is not online", "user_id", toUserID)
 		return
 	}
 
 	channel := fmt.Sprintf("message:%d", toUserID)
 
-	err = ms.connRepo.Produce(ctx, channel, msg)
+	err := ms.connRepo.Produce(ctx, channel, msgToSend)
 	if err != nil {
 		slog.Error("Failed to produce message", "to_user_id", toUserID, "error", err)
 	} else {
@@ -230,29 +188,44 @@ func (ms *MessageService) write(ctx context.Context, client *Client) error {
 				return err
 			}
 
-			switch outboardMsg.TypeMessage {
-			case PrivateMessageType:
-				var v PrivateMessageEvent
+			switch outboardMsg.Type {
+			case domain.MessageType:
+				var v MessageEvent
 				if err := json.Unmarshal(outboardMsg.Data, &v); err != nil {
-					slog.Error("Failed to unmarshal", "error", err)
+					slog.Error("Failed to unmarshal message event", "error", err)
 					continue
 				}
 
-				if err := ms.msgRepo.UpdateMessageStatus(ctx, v.MessageID, domain.StatusDelivered); err != nil {
-					log.Printf("Failed to update private message status. Message %+v, status: %s, error: %v", msg, domain.StatusDelivered, err)
+				if err := ms.msgRepo.UpdateMessageStatus(ctx, v.MessageID, client.id, domain.StatusDelivered); err != nil {
+					slog.Error("Failed to update message event status",
+						"message_id", v.MessageID,
+						"error", err,
+					)
 					continue
 				}
-			case GroupMessageType:
-				var v GroupMessageEvent
+			case domain.NewMemberType, domain.KickedMemberType, domain.LeftMemberType:
+				var v GroupChangeMemberStatusEvent
 				if err := json.Unmarshal(outboardMsg.Data, &v); err != nil {
-					slog.Error("Failed to unmarshal", "error", err)
+					slog.Error("Failed to unmarshal group change member event", "error", err)
 					continue
 				}
 
-				if err := ms.msgRepo.UpdateGroupMessageStatus(ctx, v.MessageID, client.id, domain.StatusDelivered); err != nil {
-					log.Printf("Failed to update group message status. Message %+v, status: %s, error: %v", msg, domain.StatusDelivered, err)
+				if err := ms.msgRepo.UpdateMessageStatus(ctx, v.MessageID, client.id, domain.StatusDelivered); err != nil {
+					slog.Error("Failed to update group change member status event",
+						"message_id", v.MessageID,
+						"error", err,
+					)
 					continue
 				}
+			case domain.InvitedToGroupChatType, domain.DeletedFromGroupChatType:
+				slog.Debug("Group list change event sent",
+					"type", outboardMsg.Type,
+					"client_id", client.id,
+				)
+			case domain.PresenceChangeType:
+				slog.Debug("Presence change event sent", "client_id", client.id)
+			default:
+				slog.Warn("Unknown message type received", "type", outboardMsg.Type, "client_id", client.id)
 			}
 		}
 	}

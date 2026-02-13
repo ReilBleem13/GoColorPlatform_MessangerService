@@ -2,7 +2,6 @@ package server
 
 import (
 	"github.com/ReilBleem13/MessangerV2/internal/domain"
-	"github.com/ReilBleem13/MessangerV2/internal/service"
 )
 
 type NewGroupJSON struct {
@@ -15,7 +14,7 @@ type NewGroupMemberJSON struct {
 
 // KICKED_MEMBER или LEFT_MEMBER
 type DeleteGroupMemberJSON struct {
-	Type service.EventType `json:"type"`
+	Type domain.EventType `json:"type"`
 }
 
 type UpdateGroupMemberRoleJSON struct {
@@ -36,7 +35,7 @@ type GroupMembers struct {
 }
 
 type PaginateMessagesResponse struct {
-	Messages  []service.ProduceMessage `json:"messages"`
-	NewCursor *int                     `json:"new_cursor,omitempty"`
-	HasMore   bool                     `json:"has_more"`
+	Messages  []domain.Message `json:"messages"`
+	NewCursor *int             `json:"new_cursor,omitempty"`
+	HasMore   bool             `json:"has_more"`
 }

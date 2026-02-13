@@ -4,45 +4,42 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+
+	"github.com/ReilBleem13/MessangerV2/internal/domain"
 )
 
 // GROUPS
-func (ms *MessageService) NewGroup(ctx context.Context, name string, authorID int) (int, error) {
-	groupID, err := ms.msgRepo.NewGroup(ctx, name, authorID)
+func (ms *MessageService) NewGroupChat(ctx context.Context, name string, authorID int) (int, error) {
+	groupID, err := ms.msgRepo.NewGroupChat(ctx, name, authorID)
 	if err != nil {
-		slog.Error("Failed to create new group", "error", err)
+		slog.Error("Failed to create new group chat", "error", err)
 		return 0, err
 	}
 	return groupID, nil
 }
 
-func (ms *MessageService) DeleteGroup(ctx context.Context, groupID, userID int) error {
-	if err := ms.msgRepo.DeleteGroup(ctx, userID, groupID); err != nil {
-		slog.Error("Failed to detele group", "error", err)
+func (ms *MessageService) DeleteGroupChat(ctx context.Context, groupID, userID int) error {
+	if err := ms.msgRepo.DeleteGroupChat(ctx, userID, groupID); err != nil {
+		slog.Error("Failed to detele group chat", "error", err)
 		return err
 	}
 	return nil
 }
 
 func (ms *MessageService) NewGroupMember(ctx context.Context, in *GroupMemberDTO) error {
-	slog.Debug("User trying to add other user to group",
+	slog.Debug("User trying to add other user to group chat",
 		"subjectID", in.SubjectID,
 		"objectID", in.ObjectID,
 		"groupID", in.GroupID,
 	)
 
-	messageID, err := ms.msgRepo.NewGroupMember(ctx, in.GroupID, in.ObjectID)
+	messageID, err := ms.msgRepo.NewGroupChatMember(ctx, in.GroupID, in.ObjectID)
 	if err != nil {
-		slog.Error("Failed to create new group member", "error", err)
+		slog.Error("Failed to create new group chat member", "error", err)
 		return err
 	}
 
-	memberIDs, err := ms.msgRepo.GetAllGroupMembers(ctx, in.GroupID)
-	if err != nil {
-		slog.Error("Failed to get all group members", "error", err)
-		return nil
-	}
-
+	// this is necessary for the client to react to a change in the chat list
 	changeListOfGroupsEvent := ChangeListOfGroupsEvent{
 		GroupID: in.GroupID,
 	}
@@ -54,14 +51,21 @@ func (ms *MessageService) NewGroupMember(ctx context.Context, in *GroupMemberDTO
 	}
 
 	ms.handleProduce(ctx, in.ObjectID, &ProduceMessage{
-		TypeMessage: InvitedToGroup,
-		Data:        changeListOfGroupsEventByte,
+		Type: domain.InvitedToGroupChatType,
+		Data: changeListOfGroupsEventByte,
 	})
 
+	// send event to all users who is in the same chat with object
 	newMemberEvent := GroupChangeMemberStatusEvent{
 		MessageID: messageID,
 		GroupID:   in.GroupID,
 		UserID:    in.ObjectID,
+	}
+
+	memberIDs, err := ms.msgRepo.GetAllChatMembers(ctx, in.GroupID)
+	if err != nil {
+		slog.Error("Failed to get all group chat members", "error", err)
+		return nil
 	}
 
 	newMemberEventByte, err := json.Marshal(newMemberEvent)
@@ -71,10 +75,12 @@ func (ms *MessageService) NewGroupMember(ctx context.Context, in *GroupMemberDTO
 	}
 
 	for _, id := range memberIDs {
-		ms.handleProduce(ctx, id, &ProduceMessage{
-			TypeMessage: NewMemberType,
-			Data:        newMemberEventByte,
-		})
+		if id != in.ObjectID {
+			ms.handleProduce(ctx, id, &ProduceMessage{
+				Type: domain.NewMemberType,
+				Data: newMemberEventByte,
+			})
+		}
 	}
 	return nil
 }
@@ -82,38 +88,42 @@ func (ms *MessageService) NewGroupMember(ctx context.Context, in *GroupMemberDTO
 func (ms *MessageService) DeleteGroupMember(ctx context.Context, in *GroupMemberDTO) error {
 	messageID, err := ms.msgRepo.DeleteGroupMember(ctx, in.GroupID, in.ObjectID, *in.Type)
 	if err != nil {
-		slog.Error("Failed to delete group member", "error", err)
+		slog.Error("Failed to delete group chat member", "error", err)
 		return err
 	}
 
-	memberIDs, err := ms.msgRepo.GetAllGroupMembers(ctx, in.GroupID)
-	if err != nil {
-		slog.Error("Failed to get all group members", "error", err)
-		return err
+	// if type not is kicked member type it means that client already know about changes
+	// and we havent to send event
+	if *in.Type == domain.KickedMemberType {
+		changeListOfGroupsEvent := ChangeListOfGroupsEvent{
+			GroupID: in.GroupID,
+		}
+
+		changeListOfGroupsEventByte, err := json.Marshal(changeListOfGroupsEvent)
+		if err != nil {
+			slog.Error("Failed to marshal data", "error", err)
+			return nil
+		}
+
+		ms.handleProduce(ctx, in.ObjectID, &ProduceMessage{
+			Type: domain.DeletedFromGroupChatType,
+			Data: changeListOfGroupsEventByte,
+		})
 	}
 
-	changeListOfGroupsEvent := ChangeListOfGroupsEvent{
-		GroupID: in.GroupID,
-	}
-
-	changeListOfGroupsEventByte, err := json.Marshal(changeListOfGroupsEvent)
-	if err != nil {
-		slog.Error("Failed to marshal data", "error", err)
-		return nil
-	}
-
-	ms.handleProduce(ctx, in.ObjectID, &ProduceMessage{
-		TypeMessage: DeletedFromGroup,
-		Data:        changeListOfGroupsEventByte,
-	})
-
-	kickedMemberEvent := GroupChangeMemberStatusEvent{
+	deleteMemberEvent := GroupChangeMemberStatusEvent{
 		MessageID: messageID,
 		GroupID:   in.GroupID,
 		UserID:    in.ObjectID,
 	}
 
-	kickedMemberEventByte, err := json.Marshal(kickedMemberEvent)
+	memberIDs, err := ms.msgRepo.GetAllChatMembers(ctx, in.GroupID)
+	if err != nil {
+		slog.Error("Failed to get all group chat members", "error", err)
+		return err
+	}
+
+	kickedMemberEventByte, err := json.Marshal(deleteMemberEvent)
 	if err != nil {
 		slog.Error("Failed to marshal data", "error", err)
 		return nil
@@ -122,71 +132,45 @@ func (ms *MessageService) DeleteGroupMember(ctx context.Context, in *GroupMember
 	for _, id := range memberIDs {
 		if id != in.ObjectID {
 			ms.handleProduce(ctx, id, &ProduceMessage{
-				TypeMessage: KickedMemberType,
-				Data:        kickedMemberEventByte,
+				Type: *in.Type,
+				Data: kickedMemberEventByte,
 			})
 		}
 	}
 	return nil
 }
 
-func (ms *MessageService) GetAllGroupMembers(ctx context.Context, groupID int) ([]int, error) {
-	members, err := ms.msgRepo.GetAllGroupMembers(ctx, groupID)
+func (ms *MessageService) GetAllGroupChatMembers(ctx context.Context, chatID int) ([]int, error) {
+	members, err := ms.msgRepo.GetAllChatMembers(ctx, chatID)
 	if err != nil {
-		slog.Error("Failed to get all group members", "error", err)
+		slog.Error("Failed to get all group chat members", "error", err)
 		return nil, err
 	}
 	return members, nil
 }
 
-func (ms *MessageService) GetUserGroups(ctx context.Context, userID int) ([]UserGroup, error) {
-	groups, err := ms.msgRepo.GetUserGroups(ctx, userID)
+func (ms *MessageService) GetUserChats(ctx context.Context, userID int) ([]domain.UserChat, error) {
+	chats, err := ms.msgRepo.GetUserChats(ctx, userID)
 	if err != nil {
-		slog.Error("Failed to get user groups", "error", err)
+		slog.Error("Failed to get user group chats", "error", err)
 		return nil, err
 	}
-
-	result := make([]UserGroup, len(groups))
-	for i, g := range groups {
-		result[i].ID = g.ID
-		result[i].Name = g.Name
-	}
-	return result, nil
+	return chats, nil
 }
 
 func (ms *MessageService) ChangeGroupMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error {
-	if err := ms.msgRepo.ChangeGroupMemberRole(ctx, in); err != nil {
+	if err := ms.msgRepo.ChangeGroupChatMemberRole(ctx, in); err != nil {
 		slog.Error("Failed to change group member role", "error", err)
 		return err
 	}
 	return nil
 }
 
-func (ms *MessageService) NewGroupMessage(ctx context.Context, groupID, fromUserID int, content string) (int, error) {
-	groupMessageID, err := ms.msgRepo.NewGroupMessage(ctx, groupID, fromUserID, content)
+func (ms *MessageService) PaginateMessages(ctx context.Context, in *PaginateMessagesDTO) ([]domain.Message, *int, bool, error) {
+	messages, newCursor, hasMore, err := ms.msgRepo.PaginateMessages(ctx, in.ChatID, in.Cursor)
 	if err != nil {
-		slog.Error("Failed to create new group message", "error", err)
-		return 0, err
-	}
-	return groupMessageID, nil
-}
-
-func (ms *MessageService) PaginatePrivateMessages(ctx context.Context, in *PaginatePrivateMessagesDTO) ([]ProduceMessage, *int, bool, error) {
-	messages, newCursor, hasMore, err := ms.msgRepo.PaginatePrivateMessages(ctx, in.User1, in.User2, in.Cursor)
-	if err != nil {
-		slog.Error("Failed to paginate private messages", "error", err)
+		slog.Error("Failed to paginate chat essages", "error", err)
 		return nil, nil, false, err
 	}
-
-	return messages, newCursor, hasMore, nil
-}
-
-func (ms *MessageService) PaginateGroupMessages(ctx context.Context, in *PaginateGroupMessagesDTO) ([]ProduceMessage, *int, bool, error) {
-	messages, newCursor, hasMore, err := ms.msgRepo.PaginateGroupMessages(ctx, in.GroupID, in.Cursor)
-	if err != nil {
-		slog.Error("Failed to paginate group messages", "error", err)
-		return nil, nil, false, err
-	}
-
-	return messages, newCursor, hasMore, nil
+	return messages, newCursor, hasMore, err
 }

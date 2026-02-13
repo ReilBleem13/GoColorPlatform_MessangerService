@@ -56,7 +56,7 @@ func (h *Handler) handleNewGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groupID, err := h.msgSrv.NewGroup(r.Context(), in.Name, userID)
+	groupID, err := h.msgSrv.NewGroupChat(r.Context(), in.Name, userID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -78,14 +78,14 @@ func (h *Handler) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groupIDStr := r.PathValue("group_id")
-	groupID, err := strconv.Atoi(groupIDStr)
+	chatIDStr := r.PathValue("chat_id")
+	chatID, err := strconv.Atoi(chatIDStr)
 	if err != nil {
 		handleError(w, domain.ErrInvalidRequest)
 		return
 	}
 
-	if err := h.msgSrv.DeleteGroup(r.Context(), groupID, userID); err != nil {
+	if err := h.msgSrv.DeleteGroupChat(r.Context(), chatID, userID); err != nil {
 		handleError(w, err)
 		return
 	}
@@ -99,8 +99,8 @@ func (h *Handler) handleNewGroupMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groupIDStr := r.PathValue("group_id")
-	groupID, err := strconv.Atoi(groupIDStr)
+	chatIDStr := r.PathValue("chat_id")
+	chatID, err := strconv.Atoi(chatIDStr)
 	if err != nil {
 		handleError(w, domain.ErrInvalidRequest)
 		return
@@ -113,7 +113,7 @@ func (h *Handler) handleNewGroupMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.msgSrv.NewGroupMember(r.Context(), &service.GroupMemberDTO{
-		GroupID:   groupID,
+		GroupID:   chatID,
 		SubjectID: userID,
 		ObjectID:  in.UserID,
 	}); err != nil {
@@ -130,8 +130,8 @@ func (h *Handler) handleDeleteGroupMember(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	groupIDStr := r.PathValue("group_id")
-	groupID, err := strconv.Atoi(groupIDStr)
+	chatIDStr := r.PathValue("chat_id")
+	chatID, err := strconv.Atoi(chatIDStr)
 	if err != nil {
 		handleError(w, domain.ErrInvalidRequest)
 		return
@@ -151,7 +151,7 @@ func (h *Handler) handleDeleteGroupMember(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.msgSrv.DeleteGroupMember(r.Context(), &service.GroupMemberDTO{
-		GroupID:   groupID,
+		GroupID:   chatID,
 		SubjectID: userID,
 		ObjectID:  userIDToDelete,
 		Type:      &in.Type,
@@ -169,7 +169,7 @@ func (h *Handler) handleGetUserGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groups, err := h.msgSrv.GetUserGroups(r.Context(), userID)
+	groups, err := h.msgSrv.GetUserChats(r.Context(), userID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -181,14 +181,14 @@ func (h *Handler) handleGetUserGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleGetGroupMembers(w http.ResponseWriter, r *http.Request) {
-	groupIDStr := r.PathValue("group_id")
-	groupID, err := strconv.Atoi(groupIDStr)
+	chatIDStr := r.PathValue("chat_id")
+	chatID, err := strconv.Atoi(chatIDStr)
 	if err != nil {
 		handleError(w, domain.ErrInvalidRequest)
 		return
 	}
 
-	members, err := h.msgSrv.GetAllGroupMembers(r.Context(), groupID)
+	members, err := h.msgSrv.GetAllGroupChatMembers(r.Context(), chatID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -210,8 +210,8 @@ func (h *Handler) handleUpdateGroupMemberRole(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	groupIDStr := r.PathValue("group_id")
-	groupID, err := strconv.Atoi(groupIDStr)
+	chatIDStr := r.PathValue("chat_id")
+	chatID, err := strconv.Atoi(chatIDStr)
 	if err != nil {
 		handleError(w, domain.ErrInvalidRequest)
 		return
@@ -224,9 +224,9 @@ func (h *Handler) handleUpdateGroupMemberRole(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := h.msgSrv.ChangeGroupMemberRole(r.Context(), &service.UpdateGroupMemberRoleDTO{
-		Role:    in.Role,
-		GroupID: groupID,
-		UserID:  userID,
+		Role:   in.Role,
+		ChatID: chatID,
+		UserID: userID,
 	}); err != nil {
 		handleError(w, err)
 		return
@@ -234,52 +234,15 @@ func (h *Handler) handleUpdateGroupMemberRole(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(200)
 }
 
-func (h *Handler) handlePaginatePrivateMessages(w http.ResponseWriter, r *http.Request) {
-	chatIDStr := r.PathValue("chat_id")
-	chatID, err := strconv.Atoi(groupIDStr)
-	if err != nil {
-		handleError(w, domain.ErrInvalidRequest)
-		return
-	}
-
-	var in PaginateMessagesJSON
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			handleError(w, err)
-			return
-		}
-	}
-
-	messages, newCursor, hasMore, err := h.msgSrv.PaginatePrivateMessages(r.Context(), &service.PaginatePrivateMessagesDTO{
-		User1:  userID1,
-		User2:  userID2,
-		Cursor: in.Cursor,
-	})
-	if err != nil {
-		handleError(w, err)
-		return
-	}
-
-	resp := &PaginateMessagesResponse{
-		Messages:  messages,
-		NewCursor: newCursor,
-		HasMore:   hasMore,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	json.NewEncoder(w).Encode(resp)
-}
-
-func (h *Handler) handlePaginateGroupMessages(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handlePaginateMessages(w http.ResponseWriter, r *http.Request) {
 	userID, err := GetUserIDFromContext(r.Context())
 	if err != nil {
 		handleError(w, domain.ErrInternalServerError)
 		return
 	}
 
-	groupIDStr := r.PathValue("group_id")
-	groupID, err := strconv.Atoi(groupIDStr)
+	chatIDStr := r.PathValue("chat_id")
+	chatID, err := strconv.Atoi(chatIDStr)
 	if err != nil {
 		handleError(w, domain.ErrInvalidRequest)
 		return
@@ -293,10 +256,10 @@ func (h *Handler) handlePaginateGroupMessages(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	messages, newCursor, hasMore, err := h.msgSrv.PaginateGroupMessages(r.Context(), &service.PaginateGroupMessagesDTO{
-		UserID:  userID,
-		GroupID: groupID,
-		Cursor:  in.Cursor,
+	messages, newCursor, hasMore, err := h.msgSrv.PaginateMessages(r.Context(), &service.PaginateMessagesDTO{
+		UserID: userID,
+		ChatID: chatID,
+		Cursor: in.Cursor,
 	})
 	if err != nil {
 		handleError(w, err)
