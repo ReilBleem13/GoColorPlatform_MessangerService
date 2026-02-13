@@ -1,6 +1,7 @@
 -- +goose Up
 CREATE TYPE message_status AS ENUM ('SENT', 'DELIVERED', 'READ');
 CREATE TYPE chat_type AS ENUM ('PRIVATE', 'GROUP');
+CREATE TYPE message_type AS ENUM ('MESSAGE', 'NEW_MEMBER', 'LEFT_MEMBER', 'KICKED_MEMBER')
 
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
