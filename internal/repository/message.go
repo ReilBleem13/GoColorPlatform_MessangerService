@@ -326,6 +326,26 @@ func (mp *MessageRepo) GetUserChats(ctx context.Context, userID int) ([]domain.U
 	return userChats, nil
 }
 
+func (mp *MessageRepo) GetGroupChatMemberRole(ctx context.Context, userID, chatID int) (domain.GroupMemberRole, error) {
+	query := `
+		SELECT 
+			role
+		FROM chat_members
+		WHERE chat_id = $1
+			AND user_id = $2
+	`
+
+	var role domain.GroupMemberRole
+	if err := mp.db.GetContext(ctx, &role, query,
+		chatID,
+		userID,
+	); err != nil {
+		return "", err
+	}
+
+	return role, nil
+}
+
 func (mp *MessageRepo) ChangeGroupChatMemberRole(ctx context.Context, in *service.UpdateGroupMemberRoleDTO) error {
 	query := `
 		UPDATE chat_members 
@@ -336,7 +356,7 @@ func (mp *MessageRepo) ChangeGroupChatMemberRole(ctx context.Context, in *servic
 	_, err := mp.db.ExecContext(ctx, query,
 		string(in.Role),
 		in.ChatID,
-		in.UserID,
+		in.ObjectID,
 	)
 	return err
 }

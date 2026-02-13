@@ -53,9 +53,10 @@ type GroupMemberDTO struct {
 }
 
 type UpdateGroupMemberRoleDTO struct {
-	Role   domain.GroupMemberRole
-	ChatID int
-	UserID int
+	Role      domain.GroupMemberRole
+	SubjectID int
+	ObjectID  int
+	ChatID    int
 }
 
 type PaginateMessagesDTO struct {

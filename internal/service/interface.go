@@ -20,6 +20,7 @@ type MessageRepoIn interface {
 	NewGroupChatMember(ctx context.Context, chatID, userID int) (int, error)
 	DeleteGroupMember(ctx context.Context, chatID, userID int, typeDelete domain.EventType) (int, error)
 	GetAllChatMembers(ctx context.Context, chatID int) ([]int, error)
+	GetGroupChatMemberRole(ctx context.Context, userID, chatID int) (domain.GroupMemberRole, error)
 	ChangeGroupChatMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
 
 	GetUserChats(ctx context.Context, userID int) ([]domain.UserChat, error)

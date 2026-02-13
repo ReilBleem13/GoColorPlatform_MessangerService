@@ -86,6 +86,20 @@ func (ms *MessageService) NewGroupMember(ctx context.Context, in *GroupMemberDTO
 }
 
 func (ms *MessageService) DeleteGroupMember(ctx context.Context, in *GroupMemberDTO) error {
+	role, err := ms.msgRepo.GetGroupChatMemberRole(ctx, in.SubjectID, in.GroupID)
+	if err != nil {
+		slog.Error("Failed to get user role in group chat", "error", err)
+		return err
+	}
+
+	if role != domain.AdminRole {
+		slog.Warn("Not admin trying to delete member",
+			"subject", in.SubjectID,
+			"object", in.ObjectID,
+		)
+		return domain.ErrForbidden.WithMessage("Change member role can only admin")
+	}
+
 	messageID, err := ms.msgRepo.DeleteGroupMember(ctx, in.GroupID, in.ObjectID, *in.Type)
 	if err != nil {
 		slog.Error("Failed to delete group chat member", "error", err)
@@ -159,6 +173,21 @@ func (ms *MessageService) GetUserChats(ctx context.Context, userID int) ([]domai
 }
 
 func (ms *MessageService) ChangeGroupMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error {
+	role, err := ms.msgRepo.GetGroupChatMemberRole(ctx, in.SubjectID, in.ChatID)
+	if err != nil {
+		slog.Error("Failed to get user role in group chat", "error", err)
+		return err
+	}
+
+	if role != domain.AdminRole {
+		slog.Warn("Not admin trying to change member role",
+			"subject", in.SubjectID,
+			"object", in.ObjectID,
+			"role", string(in.Role),
+		)
+		return domain.ErrForbidden.WithMessage("Change member role can only admin")
+	}
+
 	if err := ms.msgRepo.ChangeGroupChatMemberRole(ctx, in); err != nil {
 		slog.Error("Failed to change group member role", "error", err)
 		return err

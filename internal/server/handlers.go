@@ -43,7 +43,7 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 	h.msgSrv.HandleConn(r.Context(), client)
 }
 
-func (h *Handler) handleNewGroup(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleNewGroupChat(w http.ResponseWriter, r *http.Request) {
 	userID, err := GetUserIDFromContext(r.Context())
 	if err != nil {
 		handleError(w, domain.ErrInternalServerError)
@@ -71,7 +71,7 @@ func (h *Handler) handleNewGroup(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (h *Handler) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleDeleteGroupChat(w http.ResponseWriter, r *http.Request) {
 	userID, err := GetUserIDFromContext(r.Context())
 	if err != nil {
 		handleError(w, domain.ErrInternalServerError)
@@ -92,7 +92,7 @@ func (h *Handler) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-func (h *Handler) handleNewGroupMember(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleNewGroupChatMember(w http.ResponseWriter, r *http.Request) {
 	userID, err := GetUserIDFromContext(r.Context())
 	if err != nil {
 		handleError(w, domain.ErrInternalServerError)
@@ -123,7 +123,7 @@ func (h *Handler) handleNewGroupMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 }
 
-func (h *Handler) handleDeleteGroupMember(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleDeleteGroupChatMember(w http.ResponseWriter, r *http.Request) {
 	userID, err := GetUserIDFromContext(r.Context())
 	if err != nil {
 		handleError(w, domain.ErrInternalServerError)
@@ -162,7 +162,7 @@ func (h *Handler) handleDeleteGroupMember(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(200)
 }
 
-func (h *Handler) handleGetUserGroups(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleGetUserChats(w http.ResponseWriter, r *http.Request) {
 	userID, err := GetUserIDFromContext(r.Context())
 	if err != nil {
 		handleError(w, domain.ErrInternalServerError)
@@ -177,10 +177,11 @@ func (h *Handler) handleGetUserGroups(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+
 	json.NewEncoder(w).Encode(groups)
 }
 
-func (h *Handler) handleGetGroupMembers(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleGetGroupChatMembers(w http.ResponseWriter, r *http.Request) {
 	chatIDStr := r.PathValue("chat_id")
 	chatID, err := strconv.Atoi(chatIDStr)
 	if err != nil {
@@ -203,7 +204,7 @@ func (h *Handler) handleGetGroupMembers(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (h *Handler) handleUpdateGroupMemberRole(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleUpdateGroupChatMemberRole(w http.ResponseWriter, r *http.Request) {
 	userID, err := GetUserIDFromContext(r.Context())
 	if err != nil {
 		handleError(w, domain.ErrInternalServerError)
@@ -224,9 +225,10 @@ func (h *Handler) handleUpdateGroupMemberRole(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := h.msgSrv.ChangeGroupMemberRole(r.Context(), &service.UpdateGroupMemberRoleDTO{
-		Role:   in.Role,
-		ChatID: chatID,
-		UserID: userID,
+		Role:      in.Role,
+		SubjectID: userID,
+		ObjectID:  in.UserID,
+		ChatID:    chatID,
 	}); err != nil {
 		handleError(w, err)
 		return

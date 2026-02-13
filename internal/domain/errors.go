@@ -59,4 +59,10 @@ var (
 		Code:   "Unauthorized",
 		Status: 401,
 	}
+
+	ErrForbidden = &AppError{
+		Code:    "FORBIDDEN",
+		Message: "Insufficient permissions",
+		Status:  403,
+	}
 )
