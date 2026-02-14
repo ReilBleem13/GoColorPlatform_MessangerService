@@ -195,7 +195,7 @@ func (h *Handler) handleGetGroupChatMembers(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	resp := &GroupMembers{
+	resp := &ChatMembers{
 		Members: members,
 	}
 

@@ -10,16 +10,21 @@ import (
 
 type MessageRepoIn interface {
 	NewMessage(ctx context.Context, in *domain.Message) (int, error)
+	EditMessage(ctx context.Context, messageID int, content string) error
+	DeleteMessage(ctx context.Context, messageID int) error
+	GetMessageAuthorID(ctx context.Context, messageID int) (int, error)
 	PaginateMessages(ctx context.Context, chatID int, cursor *int) ([]domain.Message, *int, bool, error)
 	GetAllUndeliveredMessages(ctx context.Context, userID int) ([]domain.Message, error)
-	UpdateMessageStatus(ctx context.Context, messageID, userID int, status domain.MessageStatus) error
+	SetDeliveredAtStatus(ctx context.Context, messageID, userID int) error
+	SetReadAtStatus(ctx context.Context, upToID, chatID, userID int) error
 
 	NewGroupChat(ctx context.Context, name string, authorID int) (int, error)
 	DeleteGroupChat(ctx context.Context, chatID, authorID int) error
 
+	GetOrCreatePrivateChat(ctx context.Context, userID1, userID2 int) (int, bool, error)
 	NewGroupChatMember(ctx context.Context, chatID, userID int) (int, error)
 	DeleteGroupMember(ctx context.Context, chatID, userID int, typeDelete domain.EventType) (int, error)
-	GetAllChatMembers(ctx context.Context, chatID int) ([]int, error)
+	GetAllChatMembers(ctx context.Context, chatID int) ([]*domain.ChatMember, error)
 	GetGroupChatMemberRole(ctx context.Context, userID, chatID int) (domain.GroupMemberRole, error)
 	ChangeGroupChatMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
 
@@ -48,7 +53,7 @@ type MessageServiceIn interface {
 	GetUserChats(ctx context.Context, userID int) ([]domain.UserChat, error)
 	NewGroupMember(ctx context.Context, in *GroupMemberDTO) error
 	DeleteGroupMember(ctx context.Context, in *GroupMemberDTO) error
-	GetAllGroupChatMembers(ctx context.Context, chatID int) ([]int, error)
+	GetAllGroupChatMembers(ctx context.Context, chatID int) ([]*domain.ChatMember, error)
 	ChangeGroupMemberRole(ctx context.Context, in *UpdateGroupMemberRoleDTO) error
 }
 

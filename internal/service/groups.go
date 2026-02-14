@@ -62,7 +62,7 @@ func (ms *MessageService) NewGroupMember(ctx context.Context, in *GroupMemberDTO
 		UserID:    in.ObjectID,
 	}
 
-	memberIDs, err := ms.msgRepo.GetAllChatMembers(ctx, in.GroupID)
+	members, err := ms.msgRepo.GetAllChatMembers(ctx, in.GroupID)
 	if err != nil {
 		slog.Error("Failed to get all group chat members", "error", err)
 		return nil
@@ -74,9 +74,9 @@ func (ms *MessageService) NewGroupMember(ctx context.Context, in *GroupMemberDTO
 		return nil
 	}
 
-	for _, id := range memberIDs {
-		if id != in.ObjectID {
-			ms.handleProduce(ctx, id, &ProduceMessage{
+	for _, member := range members {
+		if member.ID != in.ObjectID {
+			ms.handleProduce(ctx, member.ID, &ProduceMessage{
 				Type: domain.NewMemberType,
 				Data: newMemberEventByte,
 			})
@@ -131,7 +131,7 @@ func (ms *MessageService) DeleteGroupMember(ctx context.Context, in *GroupMember
 		UserID:    in.ObjectID,
 	}
 
-	memberIDs, err := ms.msgRepo.GetAllChatMembers(ctx, in.GroupID)
+	members, err := ms.msgRepo.GetAllChatMembers(ctx, in.GroupID)
 	if err != nil {
 		slog.Error("Failed to get all group chat members", "error", err)
 		return err
@@ -143,9 +143,9 @@ func (ms *MessageService) DeleteGroupMember(ctx context.Context, in *GroupMember
 		return nil
 	}
 
-	for _, id := range memberIDs {
-		if id != in.ObjectID {
-			ms.handleProduce(ctx, id, &ProduceMessage{
+	for _, member := range members {
+		if member.ID != in.ObjectID {
+			ms.handleProduce(ctx, member.ID, &ProduceMessage{
 				Type: *in.Type,
 				Data: kickedMemberEventByte,
 			})
@@ -154,11 +154,16 @@ func (ms *MessageService) DeleteGroupMember(ctx context.Context, in *GroupMember
 	return nil
 }
 
-func (ms *MessageService) GetAllGroupChatMembers(ctx context.Context, chatID int) ([]int, error) {
+// Implement a returned object of type user_id, nickname, status online
+func (ms *MessageService) GetAllGroupChatMembers(ctx context.Context, chatID int) ([]*domain.ChatMember, error) {
 	members, err := ms.msgRepo.GetAllChatMembers(ctx, chatID)
 	if err != nil {
 		slog.Error("Failed to get all group chat members", "error", err)
 		return nil, err
+	}
+
+	for _, member := range members {
+		member.IsOnline = ms.heartbeatService.IsUserOnline(ctx, member.ID)
 	}
 	return members, nil
 }

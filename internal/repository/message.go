@@ -85,6 +85,48 @@ func (mp *MessageRepo) NewMessage(ctx context.Context, in *domain.Message) (int,
 	return messageID, nil
 }
 
+func (mp *MessageRepo) EditMessage(ctx context.Context, messageID int, content string) error {
+	query := `
+		UPDATE messages
+		SET content = $1, updated_at = NOW()
+		WHERE id = $2;
+	`
+
+	_, err := mp.db.ExecContext(ctx, query,
+		content,
+		messageID,
+	)
+	return err
+}
+
+func (mp *MessageRepo) DeleteMessage(ctx context.Context, messageID int) error {
+	query := `
+		DETELE FROM messages
+		WHERE id = $1
+	`
+
+	_, err := mp.db.ExecContext(ctx, query,
+		messageID,
+	)
+	return err
+}
+
+func (mp *MessageRepo) GetMessageAuthorID(ctx context.Context, messageID int) (int, error) {
+	query := `
+		SELECT from_user_id
+		FROM messages
+		WHERE id = $1
+	`
+
+	var userID int
+	if err := mp.db.GetContext(ctx, &userID, query,
+		messageID,
+	); err != nil {
+		return 0, err
+	}
+	return userID, nil
+}
+
 func (mp *MessageRepo) NewGroupChat(ctx context.Context, name string, authorID int) (int, error) {
 	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
 	if err != nil {
@@ -200,10 +242,10 @@ func (mp *MessageRepo) NewGroupChatMember(ctx context.Context, chatID, userID in
 		ON CONFLICT (message_id, user_id) DO NOTHING;
 	`
 
-	for _, memberID := range members {
+	for _, member := range members {
 		_, err := tx.ExecContext(ctx, statusQuery,
 			messageID,
-			memberID,
+			member.ID,
 			string(domain.StatusSent),
 		)
 		if err != nil {
@@ -265,10 +307,10 @@ func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, chatID, userID int
 		ON CONFLICT (message_id, user_id) DO NOTHING;
 	`
 
-	for _, memberID := range members {
+	for _, member := range members {
 		_, err := tx.ExecContext(ctx, statusQuery,
 			messageID,
-			memberID,
+			member.ID,
 			string(domain.StatusSent),
 		)
 		if err != nil {
@@ -282,24 +324,96 @@ func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, chatID, userID int
 	return messageID, nil
 }
 
-func (mp *MessageRepo) GetAllChatMembers(ctx context.Context, chatID int) ([]int, error) {
+func (mp *MessageRepo) GetAllChatMembers(ctx context.Context, chatID int) ([]*domain.ChatMember, error) {
 	return mp.getAllChatMembersWithExecutor(ctx, mp.db, chatID)
 }
 
-func (mp *MessageRepo) getAllChatMembersWithExecutor(ctx context.Context, executor sqlx.ExtContext, chatID int) ([]int, error) {
+func (mp *MessageRepo) getAllChatMembersWithExecutor(ctx context.Context, executor sqlx.ExtContext, chatID int) ([]*domain.ChatMember, error) {
 	query := `
-		SELECT user_id
-		FROM chat_members WHERE chat_id = $1
+		SELECT 
+			cm.user_id AS id,
+			u.nickname
+		FROM chat_members cm
+		JOIN users u ON cm.user_id = u.id
+		WHERE cm.chat_id = $1
 	`
 
-	var chatMembersIDs []int
-	err := sqlx.SelectContext(ctx, executor, &chatMembersIDs, query,
+	var chatMembers []*domain.ChatMember
+	err := sqlx.SelectContext(ctx, executor, &chatMembers, query,
 		chatID,
 	)
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	return chatMembersIDs, nil
+	return chatMembers, nil
+}
+
+func (mp *MessageRepo) GetOrCreatePrivateChat(ctx context.Context, userID1, userID2 int) (int, bool, error) {
+	tx, err := mp.db.BeginTxx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, false, err
+	}
+	defer tx.Rollback()
+
+	query := `
+		SELECT c.id
+		FROM chats c
+		JOIN chat_members cm1 ON cm1.chat_id = c.id
+		JOIN chat_members cm2 ON cm2.chat_id = c.id
+		WHERE c.type = $1
+			AND cm1.user_id = $2
+			AND cm2.user_id = $3
+			AND cm1.user_id != cm2.user_id
+	`
+
+	var chatID int
+	err = tx.GetContext(ctx, &chatID, query,
+		string(domain.Private),
+		userID1,
+		userID2,
+	)
+	if err == nil {
+		if err := tx.Commit(); err != nil {
+			return 0, false, err
+		}
+		return chatID, false, nil
+	}
+
+	if err != sql.ErrNoRows {
+		return 0, false, err
+	}
+
+	query = `
+		INSERT INTO chats (type)
+		VALUES ($1)
+		RETURNING id
+	`
+	err = tx.QueryRowContext(ctx, query,
+		string(domain.Private),
+	).Scan(&chatID)
+	if err != nil {
+		return 0, false, err
+	}
+
+	query = `
+		INSERT INTO chat_members (chat_id, user_id)
+		VALUES ($1, $2)
+	`
+
+	for _, userID := range []int{userID1, userID2} {
+		_, err = tx.ExecContext(ctx, query,
+			chatID,
+			userID,
+		)
+		if err != nil {
+			return 0, false, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, false, err
+	}
+	return chatID, true, nil
 }
 
 func (mp *MessageRepo) GetUserChats(ctx context.Context, userID int) ([]domain.UserChat, error) {
@@ -424,16 +538,15 @@ func (mp *MessageRepo) PaginateMessages(ctx context.Context, chatID int, cursor 
 	return messages, nextCursor, hasMore, nil
 }
 
-func (mp *MessageRepo) UpdateMessageStatus(ctx context.Context, messageID, userID int, status domain.MessageStatus) error {
+func (mp *MessageRepo) SetDeliveredAtStatus(ctx context.Context, messageID, userID int) error {
 	query := `
 		UPDATE message_status
-			SET status = $1
+			SET status = 'DELIVERED', delivered_at = NOW()
 		WHERE message_id = $2 
 			AND user_id = $3;
 	`
 
 	_, err := mp.db.ExecContext(ctx, query,
-		string(status),
 		messageID,
 		userID,
 	)
@@ -441,6 +554,26 @@ func (mp *MessageRepo) UpdateMessageStatus(ctx context.Context, messageID, userI
 		return err
 	}
 	return nil
+}
+
+func (mp *MessageRepo) SetReadAtStatus(ctx context.Context, upToID, chatID, userID int) error {
+	query := `
+		UPDATE message_status ms
+		SET status = 'READ', read_at = NOW()
+		FROM messages m
+		WHERE ms.message_id = m.id
+			AND m.chat_id = $1
+			AND ms.message_id <= $2
+			AND ms.user_id = $3
+			AND ms.status = 'DELIVERED'
+	`
+
+	_, err := mp.db.ExecContext(ctx, query,
+		chatID,
+		upToID,
+		userID,
+	)
+	return err
 }
 
 func (mp *MessageRepo) GetUserContacts(ctx context.Context, userID int) ([]int, error) {

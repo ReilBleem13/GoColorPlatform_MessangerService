@@ -31,8 +31,8 @@ type CreatedGroup struct {
 	GroupID int `json:"group_id"`
 }
 
-type GroupMembers struct {
-	Members []int `json:"members"`
+type ChatMembers struct {
+	Members []*domain.ChatMember `json:"members"`
 }
 
 type PaginateMessagesResponse struct {

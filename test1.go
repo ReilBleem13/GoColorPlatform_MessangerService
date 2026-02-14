@@ -33,7 +33,6 @@ func main() {
 		conns = append(conns, c)
 		log.Printf("conn %d established", i)
 	}
-
 	log.Println("all connections established")
 	select {}
 }

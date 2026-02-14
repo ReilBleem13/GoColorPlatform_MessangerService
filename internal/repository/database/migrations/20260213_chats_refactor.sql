@@ -32,7 +32,8 @@ CREATE TABLE messages (
     from_user_id INT REFERENCES users(id) NOT NULL,
     message_type TEXT DEFAULT 'MESSAGE'
     content TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE message_status (
