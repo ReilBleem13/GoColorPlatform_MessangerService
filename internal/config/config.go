@@ -24,6 +24,7 @@ type JWT struct {
 }
 
 type Redis struct {
+	Host string `env:"REDIS_HOST" env-required:"true"`
 	Port string `env:"REDIS_PORT" env-required:"true"`
 }
 

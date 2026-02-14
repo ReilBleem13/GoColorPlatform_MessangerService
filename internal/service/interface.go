@@ -36,7 +36,7 @@ type ConnectionRepoIn interface {
 	Subscribe(ctx context.Context, userID int) *redis.PubSub
 	Produce(ctx context.Context, channel string, msg *ProduceMessage) error
 
-	UpdateOnlineStatus(ctx context.Context, in *Presence) error
+	UpdateOnlineStatus(ctx context.Context, in *PresenceEvent) error
 	GetOnlineStatus(ctx context.Context, userID int) (time.Time, error)
 
 	GetAllOnlineUsers(ctx context.Context) ([]OnlineUsersWithLastTimestamp, error)

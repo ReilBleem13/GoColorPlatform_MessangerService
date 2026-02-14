@@ -56,9 +56,9 @@ const (
 	MessageReadType      EventType = "message_read"
 	NewChatType          EventType = "new_chat"
 
-	NewMemberType    EventType = "NEW_MEMBER"
-	LeftMemberType   EventType = "LEFT_MEMBER"
-	KickedMemberType EventType = "KICKED_MEMBER"
+	NewMemberType    EventType = "new_member"
+	LeftMemberType   EventType = "left_member"
+	KickedMemberType EventType = "kicked_member"
 
 	InvitedToGroupChatType   EventType = "INVITED_TO_CHAT"
 	DeletedFromGroupChatType EventType = "DELETED_FROM_CHAT"

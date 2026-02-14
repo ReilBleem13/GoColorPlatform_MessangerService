@@ -26,8 +26,9 @@ type MessageService struct {
 
 func NewMessageService(heartbeatService HeartbeatServiceIn, msgRepo MessageRepoIn, connRepo ConnectionRepoIn) MessageServiceIn {
 	return &MessageService{
-		msgRepo:  msgRepo,
-		connRepo: connRepo,
+		heartbeatService: heartbeatService,
+		msgRepo:          msgRepo,
+		connRepo:         connRepo,
 	}
 }
 
@@ -35,7 +36,7 @@ func (ms *MessageService) HandleConn(ctx context.Context, client *Client) {
 	client.conn.SetPongHandler(func(string) error {
 		client.conn.SetReadDeadline(time.Now().Add(pongWait))
 
-		slog.Debug("Handle heartbeat", "client_id", client.id)
+		slog.Info("Handle heartbeat", "client_id", client.id)
 
 		if err := ms.heartbeatService.HandleHeartbeat(ctx, client.id); err != nil {
 			slog.Error("Failed t0 handle heartbeat", "user_id", client.id, "error", err)
@@ -84,7 +85,8 @@ func (ms *MessageService) read(ctx context.Context, client *Client) error {
 				if websocket.IsUnexpectedCloseError(err,
 					websocket.CloseGoingAway,
 					websocket.CloseAbnormalClosure,
-					websocket.CloseNoStatusReceived) {
+					websocket.CloseNoStatusReceived,
+					websocket.CloseNormalClosure) {
 					slog.Error("Websoket close error", "error", err)
 				}
 				return context.Canceled
@@ -113,12 +115,16 @@ func (ms *MessageService) read(ctx context.Context, client *Client) error {
 					slog.Error("Failed to unmarshal SendMarkAsReadRequest", "error", err)
 					continue
 				}
+				ms.handleSendMarkAsRead(ctx, client, &msg)
+
 			case string(domain.MessageDeliveredType):
-				var msg SendMarkAsDelivered
+				var msg SendMarkAsDeliveredRequest
 				if err := json.Unmarshal(rawMessage, &msg); err != nil {
 					slog.Error("Failed to unmarshal SendMarkAsDelivered", "error", err)
 					continue
 				}
+				ms.handleSendMarkAsDelivered(ctx, client, &msg)
+
 			default:
 				slog.Warn("Unknown message type", "type", typeCheck.Type)
 			}
@@ -138,6 +144,8 @@ func (ms *MessageService) mapSendMessageRequest(ctx context.Context, client *Cli
 }
 
 func (ms *MessageService) handleSendMessage(ctx context.Context, client *Client, msgToSend *SendMessageRequest) {
+	slog.Info("Starting to handle 'SEND MESSAGE'", "client_id", client.id)
+
 	var (
 		chatID    int
 		isNewChat bool
@@ -156,6 +164,7 @@ func (ms *MessageService) handleSendMessage(ctx context.Context, client *Client,
 			)
 			return
 		}
+		slog.Info("Completed 'GetOrCreatePrivateChat'", "chat_id", chatID, "is_new_chat", isNewChat)
 
 		// send new chat event to recipient
 		newChatEvent := NewChatEvent{
@@ -175,6 +184,8 @@ func (ms *MessageService) handleSendMessage(ctx context.Context, client *Client,
 			Type: domain.NewChatType,
 			Data: newChatEventByte,
 		})
+
+		slog.Info("produced new chat event to user", "user_id", *msgToSend.ToUserID)
 	} else {
 		chatID = *msgToSend.ChatID
 	}
@@ -214,6 +225,8 @@ func (ms *MessageService) handleSendMessage(ctx context.Context, client *Client,
 		Data: msgConfirmedEventByte,
 	})
 
+	slog.Info("Produced confirmed event to client")
+
 	// send new message event to recepient
 	newMessageEvent := NewMessageEvent{
 		ChatID:     chatID,
@@ -235,15 +248,19 @@ func (ms *MessageService) handleSendMessage(ctx context.Context, client *Client,
 		return
 	}
 
+	slog.Info("Completed GetAllChatMembers", "chatMembers", chatMembers)
+
 	for _, member := range chatMembers {
 		if member.ID != client.id {
 			ms.handleProduce(ctx, member.ID, &ProduceMessage{
 				Type: domain.NewMessageType,
 				Data: newMessageEventByte,
 			})
+
+			slog.Info("Produced message event to member", "member-id", member.ID)
 		}
 	}
-	slog.Debug("Message successfully provided", "message_id", messageID, "client_id", client)
+	slog.Info("Message successfully provided", "message_id", messageID, "client_id", client)
 }
 
 func (ms *MessageService) handleEditMessage(ctx context.Context, client *Client, msgToSend *SendMessageRequest) {
@@ -386,7 +403,7 @@ func (ms *MessageService) handleDeleteMessage(ctx context.Context, client *Clien
 	slog.Debug("Message successfully provided", "message_id", msgToSend.MessageID, "client_id", client)
 }
 
-func (ms *MessageService) handleSendAsDelivered(ctx context.Context, client *Client, msgToSend *SendMarkAsDelivered) {
+func (ms *MessageService) handleSendMarkAsDelivered(ctx context.Context, client *Client, msgToSend *SendMarkAsDeliveredRequest) {
 	if err := ms.msgRepo.SetDeliveredAtStatus(ctx, msgToSend.MessageID, client.id); err != nil {
 		slog.Error("Failed to set delivered at status",
 			"message_id", msgToSend.MessageID,
@@ -463,7 +480,7 @@ func (ms *MessageService) handleSendMarkAsRead(ctx context.Context, client *Clie
 
 func (ms *MessageService) handleProduce(ctx context.Context, toUserID int, msgToSend *ProduceMessage) {
 	if !ms.heartbeatService.IsUserOnline(ctx, toUserID) {
-		slog.Debug("User is not online", "user_id", toUserID)
+		slog.Info("User is not online", "user_id", toUserID)
 		return
 	}
 
@@ -472,8 +489,6 @@ func (ms *MessageService) handleProduce(ctx context.Context, toUserID int, msgTo
 	err := ms.connRepo.Produce(ctx, channel, msgToSend)
 	if err != nil {
 		slog.Error("Failed to produce message", "to_user_id", toUserID, "error", err)
-	} else {
-		slog.Info("Message successfully produced", "to_user_id", toUserID)
 	}
 }
 
@@ -504,50 +519,15 @@ func (ms *MessageService) write(ctx context.Context, client *Client) error {
 				return err
 			}
 
+			slog.Info("Accept event",
+				"clint_id", client.id,
+				"event", outboardMsg.Type,
+			)
+
 			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := client.conn.WriteJSON(&outboardMsg); err != nil {
 				slog.Error("Failed to writeJSON", "error", err)
 				return err
-			}
-
-			switch outboardMsg.Type {
-			case domain.MessageType:
-				var v MessageEvent
-				if err := json.Unmarshal(outboardMsg.Data, &v); err != nil {
-					slog.Error("Failed to unmarshal message event", "error", err)
-					continue
-				}
-
-				if err := ms.msgRepo.UpdateMessageStatus(ctx, v.MessageID, client.id, domain.StatusDelivered); err != nil {
-					slog.Error("Failed to update message event status",
-						"message_id", v.MessageID,
-						"error", err,
-					)
-					continue
-				}
-			case domain.NewMemberType, domain.KickedMemberType, domain.LeftMemberType:
-				var v GroupChangeMemberStatusEvent
-				if err := json.Unmarshal(outboardMsg.Data, &v); err != nil {
-					slog.Error("Failed to unmarshal group change member event", "error", err)
-					continue
-				}
-
-				if err := ms.msgRepo.UpdateMessageStatus(ctx, v.MessageID, client.id, domain.StatusDelivered); err != nil {
-					slog.Error("Failed to update group change member status event",
-						"message_id", v.MessageID,
-						"error", err,
-					)
-					continue
-				}
-			case domain.InvitedToGroupChatType, domain.DeletedFromGroupChatType:
-				slog.Debug("Group list change event sent",
-					"type", outboardMsg.Type,
-					"client_id", client.id,
-				)
-			case domain.PresenceChangeType:
-				slog.Debug("Presence change event sent", "client_id", client.id)
-			default:
-				slog.Warn("Unknown message type received", "type", outboardMsg.Type, "client_id", client.id)
 			}
 		}
 	}

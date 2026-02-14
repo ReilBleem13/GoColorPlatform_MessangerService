@@ -27,7 +27,8 @@ func main() {
 		return
 	}
 
-	cache.NewRedisClient(cfg.Redis.Port)
+	redisAddr := cfg.Redis.Host + ":" + cfg.Redis.Port
+	cache.NewRedisClient(redisAddr)
 	slog.Info("Redis inited")
 
 	dsn := cfg.Database.DSN()
@@ -52,6 +53,7 @@ func main() {
 
 	server := server.NewServer(
 		context.Background(),
+		cfg,
 		server.WithMigrateDown(func() error {
 			return goose.DownTo(database.Client().DB, migrationsPath, 0)
 		}),

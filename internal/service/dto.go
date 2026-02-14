@@ -7,6 +7,7 @@ import (
 	"github.com/ReilBleem13/MessangerV2/internal/domain"
 )
 
+// Request from client
 type SendMessageRequest struct {
 	Type          domain.EventType `json:"type"`
 	TempMessageID string           `json:"temp_message_id"`
@@ -31,10 +32,16 @@ type SendMarkAsReadRequest struct {
 	UpToID int              `json:"up_to_id"`
 }
 
-type SendMarkAsDelivered struct {
+type SendMarkAsDeliveredRequest struct {
 	Type      domain.EventType `json:"type"`
 	ChatID    int              `json:"chat_id"`
 	MessageID int              `json:"message_id"`
+}
+
+// Events for clients
+type ProduceMessage struct {
+	Type domain.EventType `json:"type"`
+	Data json.RawMessage  `json:"data,omitempty"`
 }
 
 type MessageConfirmedEvent struct {
@@ -46,13 +53,7 @@ type MessageConfirmedEvent struct {
 	CreatedAt     time.Time `json:"created_at,omitempty"`
 }
 
-type ProduceMessage struct {
-	Type domain.EventType `json:"type"`
-	Data json.RawMessage  `json:"data,omitempty"`
-}
-
-// events to client
-type Presence struct {
+type PresenceEvent struct {
 	UserID    int       `json:"user_id"`
 	Presence  bool      `json:"presence"`
 	Timestamp time.Time `json:"timestamp"`
@@ -105,7 +106,6 @@ type NewChatEvent struct {
 	CreatedAt  time.Time       `json:"created_at"`
 }
 
-// добавление, удаление и изменение прав
 type GroupChangeMemberStatusEvent struct {
 	MessageID int `json:"message_id"`
 	GroupID   int `json:"group_id"`

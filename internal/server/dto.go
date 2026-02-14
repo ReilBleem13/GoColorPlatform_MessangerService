@@ -18,8 +18,7 @@ type DeleteGroupMemberJSON struct {
 }
 
 type UpdateGroupMemberRoleJSON struct {
-	UserID int                    `json:"user_id"`
-	Role   domain.GroupMemberRole `json:"role"`
+	Role domain.GroupMemberRole `json:"role"`
 }
 
 type PaginateMessagesJSON struct {

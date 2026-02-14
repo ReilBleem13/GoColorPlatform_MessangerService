@@ -35,7 +35,7 @@ func (cr *ConnectionRepo) Produce(ctx context.Context, channel string, msg *serv
 	return cr.redis.Publish(ctx, channel, data).Err()
 }
 
-func (cr *ConnectionRepo) UpdateOnlineStatus(ctx context.Context, in *service.Presence) error {
+func (cr *ConnectionRepo) UpdateOnlineStatus(ctx context.Context, in *service.PresenceEvent) error {
 	key := fmt.Sprintf("user:online:%d", in.UserID)
 	return cr.redis.Set(ctx, key, in.Timestamp, 3*24*time.Hour).Err()
 }

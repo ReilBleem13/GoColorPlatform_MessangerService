@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/ReilBleem13/MessangerV2/internal/domain"
 	"github.com/ReilBleem13/MessangerV2/internal/service"
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -35,7 +37,7 @@ func (mp *MessageRepo) NewMessage(ctx context.Context, in *domain.Message) (int,
 		INSERT INTO messages (
 			chat_id,
 			from_user_id,
-			message_type,
+			event_type,
 			content
 		)
 		VALUES ($1, $2, $3, $4)
@@ -68,10 +70,10 @@ func (mp *MessageRepo) NewMessage(ctx context.Context, in *domain.Message) (int,
 		ON CONFLICT (message_id, user_id) DO NOTHING;
 	`
 
-	for _, memberID := range members {
+	for _, member := range members {
 		_, err := tx.ExecContext(ctx, statusQuery,
 			messageID,
-			memberID,
+			member.ID,
 			string(domain.StatusSent),
 		)
 		if err != nil {
@@ -212,11 +214,15 @@ func (mp *MessageRepo) NewGroupChatMember(ctx context.Context, chatID, userID in
 		userID,
 	)
 	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return 0, domain.ErrAlreadyExists
+		}
 		return 0, err
 	}
 
 	query = `
-		INSERT INTO messages (chat_id, from_user_id, message_type)
+		INSERT INTO messages (chat_id, from_user_id, event_type)
 		VALUES ($1, $2, $3)
 		RETURNING id;
 	`
@@ -281,7 +287,7 @@ func (mp *MessageRepo) DeleteGroupMember(ctx context.Context, chatID, userID int
 	}
 
 	query = `
-		INSERT INTO messages (chat_id, from_user_id, message_type)
+		INSERT INTO messages (chat_id, from_user_id, event_type)
 		VALUES($1, $2, $3)
 		RETURNING id;
 	`
@@ -481,7 +487,7 @@ func (mp *MessageRepo) GetAllUndeliveredMessages(ctx context.Context, userID int
 			m.id,
 			m.chat_id,
 			m.from_user_id,
-			m.message_type,
+			m.event_type as message_type,
 			m.content,
 			m.created_at
 		FROM messages m 
@@ -506,12 +512,12 @@ func (mp *MessageRepo) PaginateMessages(ctx context.Context, chatID int, cursor 
 			id,
 			chat_id,
 			from_user_id,
-			message_type,
+			event_type as message_type,
 			content,
 			created_at
 		FROM messages 
 		WHERE chat_id = $1 
-			AND ($2 IS NULL OR id < $2)
+			AND ($2::INTEGER IS NULL OR id < $2)
 		ORDER BY id DESC
 		LIMIT 21
 	`

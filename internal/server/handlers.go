@@ -218,6 +218,13 @@ func (h *Handler) handleUpdateGroupChatMemberRole(w http.ResponseWriter, r *http
 		return
 	}
 
+	userIDToUpdateStr := r.PathValue("user_id")
+	userIDToUpdate, err := strconv.Atoi(userIDToUpdateStr)
+	if err != nil {
+		handleError(w, domain.ErrInvalidRequest)
+		return
+	}
+
 	var in UpdateGroupMemberRoleJSON
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		handleError(w, err)
@@ -227,7 +234,7 @@ func (h *Handler) handleUpdateGroupChatMemberRole(w http.ResponseWriter, r *http
 	if err := h.msgSrv.ChangeGroupMemberRole(r.Context(), &service.UpdateGroupMemberRoleDTO{
 		Role:      in.Role,
 		SubjectID: userID,
-		ObjectID:  in.UserID,
+		ObjectID:  userIDToUpdate,
 		ChatID:    chatID,
 	}); err != nil {
 		handleError(w, err)

@@ -45,11 +45,14 @@ func WithOfflineInterval(offlineScannerInterval time.Duration) HeartbeatOption {
 	}
 }
 
-func NewHeartbeatService(ctx context.Context, connRepo ConnectionRepoIn, opts ...HeartbeatOption) HeartbeatServiceIn {
+func NewHeartbeatService(ctx context.Context, connRepo ConnectionRepoIn,
+	msgRepo MessageRepoIn, opts ...HeartbeatOption) HeartbeatServiceIn {
 	hs := &HeartbeatService{
-		connRepo: connRepo,
-		interval: defaultInterval,
-		delta:    defaultDelta,
+		connRepo:               connRepo,
+		msgRepo:                msgRepo,
+		interval:               defaultInterval,
+		delta:                  defaultDelta,
+		offlineScannerInterval: defaultOfflineScannerInterval,
 	}
 
 	for _, opt := range opts {
@@ -67,7 +70,7 @@ func (hs *HeartbeatService) HandleHeartbeat(ctx context.Context, userID int) err
 
 	wasOffline := err == redis.Nil || time.Since(lastActive) > (hs.interval+hs.delta)
 
-	hs.connRepo.UpdateOnlineStatus(ctx, &Presence{
+	hs.connRepo.UpdateOnlineStatus(ctx, &PresenceEvent{
 		UserID:    userID,
 		Presence:  true,
 		Timestamp: now,
@@ -118,7 +121,7 @@ func (hs *HeartbeatService) notifyPresenceChange(ctx context.Context, userID int
 		slog.Error("Failed to get interested users")
 	}
 
-	marshalData, err := json.Marshal(Presence{
+	marshalData, err := json.Marshal(PresenceEvent{
 		UserID:    userID,
 		Presence:  isOnline,
 		Timestamp: time.Now(),

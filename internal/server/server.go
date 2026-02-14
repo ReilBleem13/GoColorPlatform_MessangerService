@@ -32,9 +32,11 @@ type Server struct {
 	migrateDown func() error
 }
 
-func NewServer(ctx context.Context, opts ...Option) *Server {
+func NewServer(ctx context.Context, cfg *config.Config, opts ...Option) *Server {
 	s := &Server{
+		ctx:    ctx,
 		router: http.NewServeMux(),
+		cfg:    cfg,
 	}
 
 	for _, opt := range opts {
@@ -44,7 +46,7 @@ func NewServer(ctx context.Context, opts ...Option) *Server {
 	msgRepository := repository.NewMessageRepo(database.Client(), cache.Client())
 	connRepository := repository.NewConnectionRepo(cache.Client())
 
-	heartbeatService := service.NewHeartbeatService(ctx, connRepository)
+	heartbeatService := service.NewHeartbeatService(ctx, connRepository, msgRepository)
 	msgService := service.NewMessageService(heartbeatService, msgRepository, connRepository)
 
 	h := NewHandler(msgService)
@@ -54,10 +56,9 @@ func NewServer(ctx context.Context, opts ...Option) *Server {
 }
 
 func (s *Server) setupRoutes(h *Handler) {
-	s.router.HandleFunc("/ws", h.handleWS)
-
 	authMiddleware := AuthMiddleware(s.cfg.JWT.Secret)
 
+	s.router.Handle("/ws", authMiddleware(http.HandlerFunc(h.handleWS)))
 	s.router.Handle("POST /chats", authMiddleware(http.HandlerFunc(h.handleNewGroupChat)))
 	s.router.Handle("DELETE /chats/{chat_id}", authMiddleware(http.HandlerFunc(h.handleDeleteGroupChat)))
 	s.router.Handle("POST /chats/{chat_id}/members", authMiddleware(http.HandlerFunc(h.handleNewGroupChatMember)))
@@ -77,7 +78,6 @@ func (s *Server) Run(addr string) error {
 		Addr:    addr,
 		Handler: s.router,
 	}
-
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("Failed to start server", "error", err)

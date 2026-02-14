@@ -85,6 +85,7 @@ func (ms *MessageService) NewGroupMember(ctx context.Context, in *GroupMemberDTO
 	return nil
 }
 
+// left_member and kicked_member - изменить обработку
 func (ms *MessageService) DeleteGroupMember(ctx context.Context, in *GroupMemberDTO) error {
 	role, err := ms.msgRepo.GetGroupChatMemberRole(ctx, in.SubjectID, in.GroupID)
 	if err != nil {
